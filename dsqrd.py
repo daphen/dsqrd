@@ -227,6 +227,17 @@ def hhmm(iso):
         return iso[11:16] if len(iso) >= 16 else ""
 
 
+def daykey(iso):
+    # YYYYMMDD in local time — matches the UI's date-divider key (Backend._dk),
+    # so dsqrd messages group by real day instead of by garbage snowflake math.
+    if not iso:
+        return ""
+    try:
+        return datetime.fromisoformat(iso).astimezone().strftime("%Y%m%d")
+    except Exception:
+        return ""
+
+
 MY_ID = ""   # own user id, set at startup; lets map_msg tag self-authored messages
 USER_NAMES = {}   # id -> display name (mention fallback when not in m["mentions"])
 CHAN_NAMES = {}   # id -> channel name (for <#id> mentions)
@@ -260,9 +271,10 @@ def map_msg(m):
         USER_NAMES[uid] = author   # learn channel participants for the @-autocomplete
     content = _resolve_mentions(m.get("content", "") or "", m)
     # reply context (Discord replies carry the parent as referenced_message)
-    reply_author = reply_text = ""
+    reply_author = reply_text = reply_to_ts = ""
     ref = m.get("referenced_message")
     if isinstance(ref, dict):
+        reply_to_ts = str(ref.get("id") or "")
         reply_author = ref.get("nick") or ref.get("global_name") or ref.get("username") or ""
         rt = (ref.get("content") or "").replace("\n", " ").strip()
         if not rt and ref.get("embeds"):
@@ -291,7 +303,8 @@ def map_msg(m):
         "text": body, "grouped": False,
         "reactionsJson": json.dumps(rx), "imagesJson": json.dumps(imgs),
         "link": link, "ts": str(m.get("id", "")), "reply_count": 0,
-        "replyAuthor": reply_author, "replyText": reply_text,
+        "replyAuthor": reply_author, "replyText": reply_text, "replyToTs": reply_to_ts,
+        "day": daykey(m.get("timestamp", "")),
         "mine": MY_ID != "" and str(m.get("user_id", "")) == MY_ID,
     }
 
@@ -603,6 +616,9 @@ class DQS:
             tmp = f"/tmp/dsqrd-paste.{mime.split('/')[1]}"
             with open(tmp, "wb") as f:
                 subprocess.run(["wl-paste", "--type", mime], stdout=f, check=True)
+            # Show an "uploading" state immediately + hand the UI the local file.
+            self.broadcast({"type": "attachUploading", "channel": channel_id,
+                            "name": os.path.basename(tmp), "path": "file://" + tmp})
             att, code = self.discord.request_attachment_url(channel_id, tmp)
             if code != 0 or not att:
                 print(f"dsqrd: attachment url failed (code {code})", flush=True)
@@ -775,6 +791,8 @@ class DQS:
                     threading.Thread(target=self._call, args=("react", fn, ch, cmd["ts"], emoji), daemon=True).start()
                 elif t == "markread" and ch and cmd.get("before"):
                     threading.Thread(target=self._call, args=("markread", self.discord.ack, ch, cmd["before"]), daemon=True).start()
+                elif t == "typing" and ch:
+                    threading.Thread(target=self.discord.send_typing, args=(ch,), daemon=True).start()
                 elif t == "view" and (cmd.get("images") or cmd.get("url")):
                     imgs = cmd.get("images") or [{"id": cmd.get("id"), "url": cmd.get("url"), "ext": cmd.get("ext", "")}]
                     threading.Thread(target=self.do_view, args=(conn, imgs, cmd.get("mediatype", "img")), daemon=True).start()
