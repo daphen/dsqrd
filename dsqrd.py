@@ -230,18 +230,18 @@ def map_embeds(m, content):
             if proxy and (hw[0] or hw[1]):
                 imgs.append({"path": proxy, "full": main or proxy, "w": hw[1] or 0, "h": hw[0] or 0,
                              "id": mid, "ext": "", "type": "img", "pending": False})
-            # url = "<link>\n> title\n> description". Skip it when that prose is already
-            # in the body — e.g. a GitHub/webhook post that spells out the issue AND
-            # triggers Discord's auto-embed of the same link (that was the double-render).
-            # Still add genuinely-new unfurl text for a bare posted link.
-            u = url.strip()
-            prose = " ".join(ln.lstrip("> ").strip() for ln in u.split("\n")[1:]).strip()
+            # url = "<link>\n> title\n> description". Drop the leading link line when the
+            # body already has that link (the user posted the bare link; the embed just
+            # restates it — that was the double link). Then drop the rest too if its prose
+            # is already in the body (a webhook post that also auto-embeds). Append only
+            # what's genuinely new.
+            lines = url.split("\n") if url else []
+            if lines and lines[0].strip() and lines[0].strip() in (content or ""):
+                lines = lines[1:]
+            u = "\n".join(lines).strip()
+            prose = " ".join(ln.lstrip("> ").strip() for ln in lines).strip()
             if u and u != (content or "").strip() and not (prose and prose[:40] in (content or "")):
                 unfurls.append(u)
-    if imgs and "youtu" in (content or "").lower():
-        print(f"dsqrd-dbg mid={mid} content={ (content or '')[:60]!r} "
-              f"embeds={[(str(e.get('type')), (e.get('proxy_url') or e.get('main_url') or '')[:90]) for e in (m.get('embeds') or [])]} "
-              f"imgs={[(i['type'], i['path'][:90]) for i in imgs]}", flush=True)
     return imgs, unfurls
 
 
@@ -654,9 +654,21 @@ class DQS:
                 print("dsqrd: clipboard has no image", flush=True)
                 return fail()
             tmp = f"/tmp/dsqrd-paste.{mime.split('/')[1]}"
+            # The clipboard can advertise image/png a beat before the bytes are servable
+            # (the source app exiting, clipse mid-store), so a single grab yields 0 bytes
+            # and the upload 400s. Retry briefly to ride out that race.
+            data = b""
+            for _ in range(5):
+                data = subprocess.run(["wl-paste", "--type", mime], capture_output=True).stdout
+                if data:
+                    break
+                time.sleep(0.2)
+            if not data:
+                print("dsqrd: clipboard image grab was empty", flush=True)
+                return fail()
             with open(tmp, "wb") as f:
-                subprocess.run(["wl-paste", "--type", mime], stdout=f, check=True)
-            # Show an "uploading" state immediately + hand the UI the local file.
+                f.write(data)
+            # Show an "uploading" state + hand the UI the local file for the optimistic preview.
             self.broadcast({"type": "attachUploading", "channel": channel_id,
                             "name": os.path.basename(tmp), "path": "file://" + tmp})
             att, code = self.discord.request_attachment_url(channel_id, tmp)
