@@ -19,6 +19,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime
 
@@ -27,6 +28,7 @@ from dchat import client_properties, discord as discord_mod, gateway as gateway_
 from dchat.notifier import Notifier
 
 SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "dsqrd.sock")
+GIT_REV = os.environ.get("DSQRD_REV", "")   # baked build rev; empty on source runs
 
 
 def _data_dir():
@@ -861,6 +863,33 @@ class DQS:
             self.send_bootstrap(conn)
             threading.Thread(target=self.read_conn, args=(conn,), daemon=True).start()
 
+    def check_updates(self):
+        """Poll the repo's main SHA and tell the client when a newer build exists.
+        Detect-only — applying is the host's job (flake bump + rebuild). Quiet on
+        source runs (DSQRD_REV unset). Conditional ETag requests stay well under
+        GitHub's unauthenticated 60/h limit."""
+        if not GIT_REV:
+            return
+        api = "https://api.github.com/repos/daphen/dsqrd/commits/main"
+        etag = None
+        while True:
+            try:
+                headers = {"User-Agent": "dsqrd", "Accept": "application/vnd.github.sha"}
+                if etag:
+                    headers["If-None-Match"] = etag
+                with urllib.request.urlopen(urllib.request.Request(api, headers=headers), timeout=15) as r:
+                    etag = r.headers.get("ETag") or etag
+                    latest = r.read().decode().strip()
+                if latest and latest != GIT_REV:
+                    self.broadcast({"type": "updateAvailable",
+                                    "current": GIT_REV[:7], "latest": latest[:7]})
+            except urllib.error.HTTPError as e:
+                if e.code != 304:   # 304 = unchanged (ETag hit); anything else: retry next cycle
+                    pass
+            except Exception:
+                pass
+            time.sleep(3 * 3600)
+
     def run(self):
         threading.Thread(target=self.gateway.connect, daemon=True).start()
         self.wait_ready()
@@ -873,6 +902,7 @@ class DQS:
         threading.Thread(target=self.drain_typing, daemon=True).start()
         threading.Thread(target=self.watch_focus, daemon=True).start()
         threading.Thread(target=self.heartbeat, daemon=True).start()
+        threading.Thread(target=self.check_updates, daemon=True).start()
         self.serve()
 
 
