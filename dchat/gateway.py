@@ -392,7 +392,9 @@ class Gateway():
         """Send data to gateway"""
         try:
             self.ws.send(json.dumps(request))
-        except websocket._exceptions.WebSocketException:
+        # OSError covers BrokenPipe/SSLError from a socket killed by suspend/wake;
+        # without it the heartbeat thread died here before flagging a reconnect.
+        except (websocket._exceptions.WebSocketException, OSError):
             self.reconnect_requested = True
 
 
