@@ -875,8 +875,20 @@ class DQS:
             conn, _ = srv.accept()
             with self.lock:
                 self.conns.append(conn)
+            # Bootstrap + serve on a per-connection thread so a slow or stuck client
+            # can't block the accept loop — that previously left every client which
+            # connected after it empty. (slqs already does its bootstrap off-thread.)
+            threading.Thread(target=self._serve_conn, args=(conn,), daemon=True).start()
+
+    def _serve_conn(self, conn):
+        try:
+            conn.settimeout(15)     # a dead client must not hang the bootstrap forever
             self.send_bootstrap(conn)
-            threading.Thread(target=self.read_conn, args=(conn,), daemon=True).start()
+            conn.settimeout(None)   # back to blocking for the command read loop
+        except OSError:
+            self.drop(conn)
+            return
+        self.read_conn(conn)
 
     def check_updates(self):
         """Poll the repo's main SHA and tell the client when a newer build exists.
