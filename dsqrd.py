@@ -109,6 +109,33 @@ def avatar_url(user_id, avatar_hash):
     return f"{CDN}/avatars/{user_id}/{avatar_hash}.png?size=64"
 
 
+AVATAR_CACHE = os.path.expanduser("~/.cache/dsqrd/avatars")
+
+
+def cached_avatar(user_id, avatar_hash):
+    """Local path of a sender's avatar for notifications (the freedesktop
+    image-path hint wants a file, not a URL); downloads and caches on miss.
+    The hash is in the filename, so a changed avatar is fetched anew."""
+    url = avatar_url(user_id, avatar_hash)
+    if not url:
+        return ""
+    path = os.path.join(AVATAR_CACHE, f"{user_id}-{avatar_hash}.png")
+    if os.path.exists(path):
+        return path
+    try:
+        os.makedirs(AVATAR_CACHE, exist_ok=True)
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=4) as r, open(path, "wb") as f:
+            shutil.copyfileobj(r, f)
+        return path
+    except Exception:
+        try:
+            os.unlink(path)   # don't leave a truncated download behind
+        except OSError:
+            pass
+        return ""
+
+
 def icon_url(guild_id, icon_hash):
     if not guild_id or not icon_hash:
         return ""
@@ -753,7 +780,13 @@ class DQS:
         body = (m.get("content") or "").replace("\n", " ").strip()[:140] or "(attachment)"
         title = f"{author}{where}"
         if self.notifier:
-            self.notifier.notify(title, body, (ws, cid))   # clickable → opens the channel
+            # Avatar download can block, so resolve it off the gateway thread;
+            # clickable → opens the channel.
+            uid, ah = m.get("user_id"), m.get("avatar")
+            threading.Thread(
+                target=lambda: self.notifier.notify(
+                    title, body, (ws, cid), image=cached_avatar(uid, ah)),
+                daemon=True).start()
         else:
             try:
                 subprocess.Popen(["notify-send", "--app-name", "Discord", title, body],
