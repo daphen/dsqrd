@@ -29,19 +29,24 @@ class Notifier:
         self.on_activate = on_activate     # called with the route of a clicked notification
         self.routes = {}                   # notification id -> route (opaque value)
         self.lock = threading.Lock()
+        self._send_lock = threading.Lock() # jeepney connections aren't thread-safe
         self._send = open_dbus_connection(bus="SESSION")
         self._recv = open_dbus_connection(bus="SESSION")
         rule = MatchRule(type="signal", interface="org.freedesktop.Notifications")
         self._recv.send_and_get_reply(message_bus.AddMatch(rule))
         threading.Thread(target=self._listen, daemon=True).start()
 
-    def notify(self, summary, body, route):
+    def notify(self, summary, body, route, image=""):
         try:
+            hints = {"image-path": ("s", image)} if image else {}
+            # Blank label on the default action: keeps click-to-open (invoked by
+            # identifier, not label) but renders no "Open" button on any daemon.
             msg = new_method_call(
                 _NOTIF, "Notify", "susssasa{sv}i",
-                (self.app, 0, "", summary, body, ["default", "Open"], {}, -1),
+                (self.app, 0, "", summary, body, ["default", ""], hints, -1),
             )
-            reply = self._send.send_and_get_reply(msg)
+            with self._send_lock:
+                reply = self._send.send_and_get_reply(msg)
             nid = reply.body[0]
             with self.lock:
                 self.routes[nid] = route
@@ -56,7 +61,8 @@ class Notifier:
         for nid in ids:
             try:
                 msg = new_method_call(_NOTIF, "CloseNotification", "u", (nid,))
-                self._send.send_and_get_reply(msg)
+                with self._send_lock:
+                    self._send.send_and_get_reply(msg)
             except Exception:
                 pass
 
