@@ -340,7 +340,10 @@ def map_msg(m):
     if isinstance(ref, dict):
         reply_to_ts = str(ref.get("id") or "")
         reply_author = ref.get("nick") or ref.get("global_name") or ref.get("username") or ""
-        rt = (ref.get("content") or "").replace("\n", " ").strip()
+        # Resolve <@id> tokens like the main content, but strip the mention
+        # markers — the reply preview renders as plain Text, not rich.
+        rt = _resolve_mentions(ref.get("content") or "", ref).replace("\n", " ").strip()
+        rt = re.sub("[\\ue000\\ue001\\ue002]", "", rt)
         if not rt and ref.get("embeds"):
             rt = "[attachment]"
         if not rt and not reply_author:
