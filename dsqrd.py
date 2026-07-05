@@ -392,6 +392,7 @@ class DQS:
         self.dm_group_name = {}   # group-DM channel id -> display name (notifications)
         self.my_id = ""           # own user id (skip self-notify, detect mentions)
         self.active_ch = None     # channel the client is currently viewing (suppress its notifications)
+        self.chan_users = {}      # channel_id -> {uid: display name} — participants seen per channel
         self.emoji_by_name = {}   # custom emoji name -> (id, animated) for react/send resolution
         self.codemap = _load_codemap()   # standard shortcode name -> unicode glyph (for reactions)
         self.notifier = None      # dbus notifier (clickable → open channel)
@@ -497,10 +498,28 @@ class DQS:
         except Exception as e:
             print(f"dsqrd: emoji build error {e!r}", flush=True)
 
-    def users_payload(self):
-        # Flat known-user list (id -> name), offered under every workspace so the
-        # client's @-autocomplete has candidates regardless of which guild/DM is open.
-        lst = [{"name": n, "id": uid} for uid, n in self.user_names.items() if n]
+    def learn_participant(self, cid, m):
+        """Record a message author as a participant of its channel. Returns
+        True when the user is new to the channel (callers re-push users)."""
+        uid = str(m.get("user_id") or "")
+        name = m.get("nick") or m.get("global_name") or m.get("username")
+        if not uid or not name:
+            return False
+        chan = self.chan_users.setdefault(cid, {})
+        fresh = uid not in chan
+        chan[uid] = name
+        return fresh
+
+    def users_payload(self, channel_id=None):
+        # @-autocomplete candidates. Scoped to a channel's PARTICIPANTS when a
+        # channel is given (Discord won't enumerate text-channel members for
+        # user tokens, so people who've messaged here is the honest set);
+        # the unscoped bootstrap list only bridges until a channel opens.
+        if channel_id is not None:
+            part = self.chan_users.get(channel_id, {})
+            lst = [{"name": n, "id": uid} for uid, n in part.items() if n]
+        else:
+            lst = [{"name": n, "id": uid} for uid, n in self.user_names.items() if n]
         wss = [DM_WS] + [g["guild_id"] for g in self.guilds]
         return {ws: lst for ws in wss}
 
@@ -544,6 +563,8 @@ class DQS:
         except Exception:
             pass
         msgs = self.discord.get_messages(channel_id, num=50) or []
+        for m in msgs:
+            self.learn_participant(channel_id, m)
         out = [map_msg(m) for m in msgs]
         out.reverse()  # API returns newest-first; client wants chronological
         if not out:
@@ -557,8 +578,8 @@ class DQS:
             if i + chunk >= len(out):
                 payload["final"] = True
             self.write(conn, payload)
-        # message authors just landed in user_names — refresh @-autocomplete candidates.
-        self.write(conn, {"type": "users", "users": self.users_payload()})
+        # Channel participants just landed — scope @-autocomplete to them.
+        self.write(conn, {"type": "users", "users": self.users_payload(channel_id)})
 
     def send_history(self, conn, channel_id, before):
         msgs = self.discord.get_messages(channel_id, num=50, before=before) or []
@@ -748,6 +769,8 @@ class DQS:
             ws = m.get("guild_id") or DM_WS
             self.chan_guild[cid] = ws
         if op in ("MESSAGE_CREATE", "MESSAGE_CREATE_QUICK", "MESSAGE_UPDATE"):
+            if self.learn_participant(cid, m) and cid == self.active_ch:
+                self.broadcast({"type": "users", "users": self.users_payload(cid)})
             self.broadcast({"type": "message", "workspace": ws, "channel": cid,
                             "thread": "", "mention": False, "msg": map_msg(m)})
             if op != "MESSAGE_UPDATE":
