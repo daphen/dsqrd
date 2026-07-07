@@ -373,6 +373,7 @@ def map_msg(m):
         "replyAuthor": reply_author, "replyText": reply_text, "replyToTs": reply_to_ts,
         "day": daykey(m.get("timestamp", "")),
         "mine": MY_ID != "" and str(m.get("user_id", "")) == MY_ID,
+        "edited": bool(m.get("edited")),
     }
 
 
