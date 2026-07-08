@@ -739,6 +739,35 @@ class DQS:
         finally:
             ev.set()   # release any send that's waiting on this upload
 
+    def do_upload_file(self, channel_id, thread, path, ev):
+        """Upload a file from disk (any type). Same staging flow as the paste —
+        the file goes out with the next message."""
+        def fail():
+            self.broadcast({"type": "attachReady", "channel": channel_id, "name": "", "ok": False})
+        try:
+            if not path or not os.path.isfile(path):
+                print(f"dsqrd: uploadFile bad path {path!r}", flush=True)
+                return fail()
+            name = os.path.basename(path)
+            img = os.path.splitext(name)[1].lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+            self.broadcast({"type": "attachUploading", "channel": channel_id,
+                            "name": name, "path": ("file://" + path) if img else ""})
+            att, code = self.discord.request_attachment_url(channel_id, path)
+            if code != 0 or not att:
+                print(f"dsqrd: uploadFile attachment url failed (code {code})", flush=True)
+                return fail()
+            if not self.discord.upload_attachment(att["upload_url"], path):
+                print("dsqrd: uploadFile upload failed", flush=True)
+                return fail()
+            att["name"] = name
+            self.pending_attach[channel_id] = att
+            self.broadcast({"type": "attachReady", "channel": channel_id, "name": name, "ok": True})
+        except Exception as e:
+            print(f"dsqrd: uploadFile error {e!r}", flush=True)
+            fail()
+        finally:
+            ev.set()
+
     # ---- loops ----
     def drain_gateway(self):
         while True:
@@ -916,6 +945,10 @@ class DQS:
                     ev = threading.Event()
                     self.uploading[ch] = ev
                     threading.Thread(target=self.do_upload_clipboard, args=(ch, cmd.get("thread"), ev), daemon=True).start()
+                elif t == "uploadFile" and ch:
+                    ev = threading.Event()
+                    self.uploading[ch] = ev
+                    threading.Thread(target=self.do_upload_file, args=(ch, cmd.get("thread"), cmd.get("path"), ev), daemon=True).start()
                 elif t == "dropAttach" and ch:
                     self.pending_attach.pop(ch, None)
                 elif t == "reactors" and ch and cmd.get("ts"):
