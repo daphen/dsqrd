@@ -642,6 +642,10 @@ class DQS:
             ev.wait(timeout=20)
         text = self.sub_emoji(text)
         att = self.pending_attach.pop(channel_id, None)   # staged image, if any
+        if att is not None:
+            at = att.pop("_thread", "")   # the attachment carries its own thread
+            if at:
+                thread = at
         atts = [att] if att else None
         if not text and not att:
             return   # nothing to send (defensive; UI guards empty + no attachment)
@@ -731,6 +735,7 @@ class DQS:
                 print("dsqrd: upload failed", flush=True)
                 return fail()
             att["name"] = os.path.basename(tmp)
+            att["_thread"] = thread or ""   # route to the thread it was staged in
             self.pending_attach[channel_id] = att
             self.broadcast({"type": "attachReady", "channel": channel_id, "name": att["name"], "ok": True})
         except Exception as e:
@@ -760,6 +765,7 @@ class DQS:
                 print("dsqrd: uploadFile upload failed", flush=True)
                 return fail()
             att["name"] = name
+            att["_thread"] = thread or ""   # route to the thread it was staged in
             self.pending_attach[channel_id] = att
             self.broadcast({"type": "attachReady", "channel": channel_id, "name": name, "ok": True})
         except Exception as e:
