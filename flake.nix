@@ -41,6 +41,7 @@
         name = "dsqrd-client";
         runtimeInputs = [ daemon pkgs.quickshell pkgs.procps pkgs.coreutils pkgs.mpv pkgs.imv pkgs.jq pkgs.curl pkgs.xdg-utils ];
         text = ''
+          export QML2_IMPORT_PATH="$HOME/.local/share/qml''${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
           export SLK_SOCK=dsqrd
           export SLK_MEDIA_VIEWER="${daemon}/share/dsqrd/media-viewer.sh"
           sock="$XDG_RUNTIME_DIR/dsqrd.sock"
