@@ -750,8 +750,8 @@ class DQS:
         The image goes out with the next message. Reports progress via attachReady.
         `ev` (the in-flight-upload Event) is created and registered by the caller so
         a racing send waits for it; we just set() it when done (in finally)."""
-        def fail():
-            self.broadcast({"type": "attachReady", "channel": channel_id, "name": "", "ok": False})
+        def fail(reason=""):
+            self.broadcast({"type": "attachReady", "channel": channel_id, "name": "", "ok": False, "err": reason})
         try:
             types = subprocess.run(["wl-paste", "--list-types"], capture_output=True, text=True).stdout
             mime = next((m for m in ("image/png", "image/jpeg", "image/gif", "image/webp") if m in types), None)
@@ -770,7 +770,7 @@ class DQS:
                 time.sleep(0.2)
             if not data:
                 print("dsqrd: clipboard image grab was empty", flush=True)
-                return fail()
+                return fail("clipboard image was empty")
             with open(tmp, "wb") as f:
                 f.write(data)
             # Show an "uploading" state + hand the UI the local file for the optimistic preview.
@@ -779,29 +779,29 @@ class DQS:
             att, code = self.discord.request_attachment_url(channel_id, tmp)
             if code != 0 or not att:
                 print(f"dsqrd: attachment url failed (code {code})", flush=True)
-                return fail()
+                return fail("Discord refused the upload (too large?)")
             if not self.discord.upload_attachment(att["upload_url"], tmp):
                 print("dsqrd: upload failed", flush=True)
-                return fail()
+                return fail("upload failed")
             att["name"] = os.path.basename(tmp)
             att["_thread"] = thread or ""   # route to the thread it was staged in
             self.pending_attach[channel_id] = att
             self.broadcast({"type": "attachReady", "channel": channel_id, "name": att["name"], "ok": True})
         except Exception as e:
             print(f"dsqrd: upload error {e!r}", flush=True)
-            fail()
+            fail(f"upload failed: {e}")
         finally:
             ev.set()   # release any send that's waiting on this upload
 
     def do_upload_file(self, channel_id, thread, path, ev):
         """Upload a file from disk (any type). Same staging flow as the paste —
         the file goes out with the next message."""
-        def fail():
-            self.broadcast({"type": "attachReady", "channel": channel_id, "name": "", "ok": False})
+        def fail(reason=""):
+            self.broadcast({"type": "attachReady", "channel": channel_id, "name": "", "ok": False, "err": reason})
         try:
             if not path or not os.path.isfile(path):
                 print(f"dsqrd: uploadFile bad path {path!r}", flush=True)
-                return fail()
+                return fail("no file at that path")
             name = os.path.basename(path)
             # Discord caps uploads at 10 MB without nitro and rejects the SEND
             # (413) after the staging upload succeeds — warn while there's
@@ -816,17 +816,17 @@ class DQS:
             att, code = self.discord.request_attachment_url(channel_id, path)
             if code != 0 or not att:
                 print(f"dsqrd: uploadFile attachment url failed (code {code})", flush=True)
-                return fail()
+                return fail("Discord refused the upload (too large?)")
             if not self.discord.upload_attachment(att["upload_url"], path):
                 print("dsqrd: uploadFile upload failed", flush=True)
-                return fail()
+                return fail("upload failed")
             att["name"] = name
             att["_thread"] = thread or ""   # route to the thread it was staged in
             self.pending_attach[channel_id] = att
             self.broadcast({"type": "attachReady", "channel": channel_id, "name": name, "ok": True})
         except Exception as e:
             print(f"dsqrd: uploadFile error {e!r}", flush=True)
-            fail()
+            fail(f"upload failed: {e}")
         finally:
             ev.set()
 
