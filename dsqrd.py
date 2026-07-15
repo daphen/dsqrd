@@ -1131,6 +1131,13 @@ class DQS:
             m, w = time.monotonic(), time.time()
             if (w - wall) - (m - mono) > 60:
                 print("dsqrd: wake from suspend — resync", flush=True)
+                # kick the gateway immediately: a short gap can still RESUME
+                # (Discord replays the missed events); a long one re-identifies
+                # now instead of waiting out a heartbeat cycle. An expired
+                # resume falls through to re-identify, and wait_online covers
+                # a network that isn't back yet.
+                self.gateway.resumable = True
+                self.gateway.reconnect_requested = True
                 time.sleep(5)   # let the network come back before clients refetch
                 self.broadcast({"type": "resync"})
             mono, wall = m, w
