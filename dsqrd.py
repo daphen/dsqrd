@@ -178,6 +178,22 @@ def _derive_gif(url):
     return None
 
 
+def _fetch_text(url, cap=64 * 1024, show=4000):
+    """Body of a small text attachment, truncated for display; "" on any failure."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            raw = r.read(cap + 1)
+        if len(raw) > cap:
+            return ""
+        txt = raw.decode("utf-8", "replace").strip()
+        if len(txt) > show:
+            txt = txt[:show].rstrip() + "\n…"
+        return txt
+    except Exception:
+        return ""
+
+
 def map_embeds(m, content):
     """Pull inline images/gifs and textual unfurls out of a normalized message.
 
@@ -253,6 +269,21 @@ def map_embeds(m, content):
         # preview image into proxy_url + hw while main_url is the article link.
         # Show that proxied image — it's a real image regardless of extension, so
         # don't gate it on _looks_image (GitHub's OG image has no extension).
+        # uploaded file that matched no media branch (message.txt overflow,
+        # pdf, zip, …) — without this the message renders completely blank.
+        # `name` is only set on real attachments, never on link embeds.
+        name = e.get("name")
+        if name and url:
+            # Discord converts >2000-char messages into a message.txt
+            # attachment: the file IS the message, so inline it. Signed CDN
+            # urls expire (~24h) — a failed fetch falls back to the chip.
+            if t.startswith("text/"):
+                txt = _fetch_text(url)
+                if txt:
+                    unfurls.append(f" {name}\n{txt}")
+                    continue
+            unfurls.append(f" {name}\n{url}")
+            continue
         if t in UNFURL_TYPES:
             if proxy and (hw[0] or hw[1]):
                 imgs.append({"path": proxy, "full": main or proxy, "w": hw[1] or 0, "h": hw[0] or 0,
@@ -629,12 +660,18 @@ class DQS:
 
     # ---- write commands ----
     def _call(self, label, fn, *fargs):
-        """Run a write action in the background and log its result."""
+        """Run a write action in the background and log its result. Failures
+        also toast — a 413 (attachment over Discord's size cap) used to
+        vanish silently and the message just never appeared."""
+        act = label.split(" ")[0]
         try:
             r = fn(*fargs)
             print(f"dsqrd: {label} -> {'ok' if r else 'FAILED'} ({r!r})", flush=True)
+            if not r:
+                self.broadcast({"type": "toast", "text": f"{act} failed — Discord rejected it (attachment too large?)"})
         except Exception as e:
             print(f"dsqrd: {label} EXC {e!r}", flush=True)
+            self.broadcast({"type": "toast", "text": f"{act} failed: {e}"})
 
     def sub_emoji(self, text):
         """Picker/typed :name: → Discord <:name:id> for our known custom emoji."""
@@ -766,6 +803,13 @@ class DQS:
                 print(f"dsqrd: uploadFile bad path {path!r}", flush=True)
                 return fail()
             name = os.path.basename(path)
+            # Discord caps uploads at 10 MB without nitro and rejects the SEND
+            # (413) after the staging upload succeeds — warn while there's
+            # still time to shrink the file instead of failing at send.
+            mb = os.path.getsize(path) / (1024 * 1024)
+            if mb > 10:
+                self.broadcast({"type": "toast",
+                                "text": f"{name} is {mb:.0f} MB — Discord rejects >10 MB without nitro"})
             img = os.path.splitext(name)[1].lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
             self.broadcast({"type": "attachUploading", "channel": channel_id,
                             "name": name, "path": ("file://" + path) if img else ""})

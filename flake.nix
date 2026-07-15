@@ -66,10 +66,12 @@
             # stale socket so the wait below lands on the fresh daemon, not a
             # leftover file. Guarantees the UI's first connect gets a bootstrap.
             rm -f "$sock"
-            setsid nohup ${daemon}/bin/dsqrd >/tmp/dsqrd.log 2>&1 </dev/null &
+            setsid nohup ${daemon}/bin/dsqrd >/tmp/dsqrd.log 2>&1 </dev/null 9>&- &
           fi
           for _ in $(seq 1 100); do [ -S "$sock" ] && break; sleep 0.1; done
-          exec qs -p "${daemon}/share/dsqrd/ui"
+          # close the launch lock for qs — an inherited fd 9 holds the lock
+          # for the UI's whole lifetime and deadlocks future launches
+          exec qs -p "${daemon}/share/dsqrd/ui" 9>&-
         '';
       };
     in {
