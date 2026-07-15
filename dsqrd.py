@@ -1120,6 +1120,21 @@ class DQS:
             if self._status_snap:
                 self.broadcast({"type": "status", "workspace": ws, "all": self._status_snap})
 
+    def watch_wake(self):
+        """Detect suspend by wall-vs-monotonic clock divergence (monotonic
+        pauses during suspend). Gateway events from the gap were never
+        delivered — and after a long gap the session re-identifies, which
+        replays nothing — so tell the UI to refetch what it's showing."""
+        mono, wall = time.monotonic(), time.time()
+        while True:
+            time.sleep(5)
+            m, w = time.monotonic(), time.time()
+            if (w - wall) - (m - mono) > 60:
+                print("dsqrd: wake from suspend — resync", flush=True)
+                time.sleep(5)   # let the network come back before clients refetch
+                self.broadcast({"type": "resync"})
+            mono, wall = m, w
+
     def run(self):
         threading.Thread(target=self.gateway.connect, daemon=True).start()
         self.wait_ready()
@@ -1132,6 +1147,7 @@ class DQS:
         threading.Thread(target=self.drain_typing, daemon=True).start()
         threading.Thread(target=self.drain_presence, daemon=True).start()
         threading.Thread(target=self.watch_focus, daemon=True).start()
+        threading.Thread(target=self.watch_wake, daemon=True).start()
         threading.Thread(target=self.heartbeat, daemon=True).start()
         threading.Thread(target=self.check_updates, daemon=True).start()
         self.serve()
