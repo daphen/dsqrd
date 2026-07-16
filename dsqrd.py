@@ -800,6 +800,62 @@ class DQS:
         finally:
             ev.set()   # release any send that's waiting on this upload
 
+    def _compress_for_discord(self, path):
+        """Shrink an image/video under Discord's ~10 MB cap. Returns the new
+        path (in /tmp) or None if the type isn't compressible or it fails."""
+        ext = os.path.splitext(path)[1].lower()
+        out = os.path.join("/tmp", "dsqrd-compress-" + os.path.basename(path))
+        try:
+            if ext in (".mp4", ".mov", ".mkv", ".webm", ".m4v"):
+                out = os.path.splitext(out)[0] + ".mp4"
+                dur = subprocess.run(
+                    ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                     "-of", "default=noprint_wrappers=1:nokey=1", path],
+                    capture_output=True, text=True).stdout.strip()
+                dur = float(dur or 0) or 1.0
+                # aim ~8.5 MB total, 96k audio, 6% mux headroom
+                vbr = int((8.5 * 8 * 1024 * 1024 / dur * 0.94) - 96000) // 1000
+                vbr = max(200, vbr)
+                r = subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error", "-i", path,
+                     "-c:v", "libx264", "-b:v", f"{vbr}k", "-maxrate", f"{vbr}k",
+                     "-bufsize", f"{vbr*2}k", "-preset", "medium", "-pix_fmt", "yuv420p",
+                     "-c:a", "aac", "-b:a", "96k", out])
+                if r.returncode != 0 or not os.path.exists(out):
+                    return None
+            elif ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+                out = os.path.splitext(out)[0] + ".jpg"
+                # cap the long edge and re-encode as jpeg; enough for screenshots
+                r = subprocess.run(
+                    ["magick", path, "-resize", "2560x2560>", "-quality", "82", out])
+                if r.returncode != 0 or not os.path.exists(out):
+                    return None
+            else:
+                return None
+            if os.path.getsize(out) / (1024 * 1024) > 10:
+                return None   # still too big — let the caller fall back to the toast
+            return out
+        except Exception as e:
+            print(f"dsqrd: compress error {e!r}", flush=True)
+            return None
+
+    def do_compress_upload(self, channel_id, thread, path, ev):
+        """Compress an oversized image/video, then hand off to the normal
+        staging upload. Runs on its own thread; ev released in the finally."""
+        try:
+            self.broadcast({"type": "toast", "text": "Compressing…"})
+            small = self._compress_for_discord(path)
+            if not small:
+                self.broadcast({"type": "attachReady", "channel": channel_id,
+                                "name": "", "ok": False, "err": "couldn't compress under 10 MB"})
+                return
+            self._stage_upload(channel_id, thread, small, os.path.basename(path))
+        finally:
+            ev.set()
+
+    COMPRESSIBLE = (".png", ".jpg", ".jpeg", ".webp", ".bmp",
+                    ".mp4", ".mov", ".mkv", ".webm", ".m4v")
+
     def do_upload_file(self, channel_id, thread, path, ev):
         """Upload a file from disk (any type). Same staging flow as the paste —
         the file goes out with the next message."""
@@ -810,32 +866,45 @@ class DQS:
                 print(f"dsqrd: uploadFile bad path {path!r}", flush=True)
                 return fail("no file at that path")
             name = os.path.basename(path)
-            # Discord caps uploads at 10 MB without nitro and rejects the SEND
-            # (413) after the staging upload succeeds — warn while there's
-            # still time to shrink the file instead of failing at send.
             mb = os.path.getsize(path) / (1024 * 1024)
+            # Discord caps uploads at 10 MB without nitro and rejects the SEND
+            # (413) after staging. If it's a compressible image/video, ask the
+            # UI whether to shrink it instead of uploading a doomed file.
             if mb > 10:
-                self.broadcast({"type": "toast",
-                                "text": f"{name} is {mb:.0f} MB — Discord rejects >10 MB without nitro"})
-            img = os.path.splitext(name)[1].lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
-            self.broadcast({"type": "attachUploading", "channel": channel_id,
-                            "name": name, "path": ("file://" + path) if img else ""})
-            att, code = self.discord.request_attachment_url(channel_id, path)
-            if code != 0 or not att:
-                print(f"dsqrd: uploadFile attachment url failed (code {code})", flush=True)
-                return fail("Discord refused the upload (too large?)")
-            if not self.discord.upload_attachment(att["upload_url"], path):
-                print("dsqrd: uploadFile upload failed", flush=True)
-                return fail("upload failed")
-            att["name"] = name
-            att["_thread"] = thread or ""   # route to the thread it was staged in
-            self.pending_attach[channel_id] = att
-            self.broadcast({"type": "attachReady", "channel": channel_id, "name": name, "ok": True})
+                if os.path.splitext(name)[1].lower() in self.COMPRESSIBLE:
+                    self.broadcast({"type": "askCompress", "channel": channel_id,
+                                    "thread": thread or "", "path": path,
+                                    "name": name, "mb": round(mb)})
+                    return
+                self.broadcast({"type": "attachReady", "channel": channel_id, "name": "",
+                                "ok": False, "err": f"{name} is {mb:.0f} MB — over Discord's 10 MB limit"})
+                return
+            self._stage_upload(channel_id, thread, path, name)
         except Exception as e:
             print(f"dsqrd: uploadFile error {e!r}", flush=True)
             fail(f"upload failed: {e}")
         finally:
             ev.set()
+
+    def _stage_upload(self, channel_id, thread, path, name):
+        """Request an attachment URL, upload the bytes, stage for the next
+        send. `name` is the display name (may differ from a temp path)."""
+        def fail(reason=""):
+            self.broadcast({"type": "attachReady", "channel": channel_id, "name": "", "ok": False, "err": reason})
+        img = os.path.splitext(name)[1].lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+        self.broadcast({"type": "attachUploading", "channel": channel_id,
+                        "name": name, "path": ("file://" + path) if img else ""})
+        att, code = self.discord.request_attachment_url(channel_id, path)
+        if code != 0 or not att:
+            print(f"dsqrd: attachment url failed (code {code})", flush=True)
+            return fail("Discord refused the upload (too large?)")
+        if not self.discord.upload_attachment(att["upload_url"], path):
+            print("dsqrd: upload failed", flush=True)
+            return fail("upload failed")
+        att["name"] = name
+        att["_thread"] = thread or ""   # route to the thread it was staged in
+        self.pending_attach[channel_id] = att
+        self.broadcast({"type": "attachReady", "channel": channel_id, "name": name, "ok": True})
 
     # ---- loops ----
     def drain_gateway(self):
@@ -1018,6 +1087,10 @@ class DQS:
                     ev = threading.Event()
                     self.uploading[ch] = ev
                     threading.Thread(target=self.do_upload_file, args=(ch, cmd.get("thread"), cmd.get("path"), ev), daemon=True).start()
+                elif t == "compressUpload" and ch:
+                    ev = threading.Event()
+                    self.uploading[ch] = ev
+                    threading.Thread(target=self.do_compress_upload, args=(ch, cmd.get("thread"), cmd.get("path"), ev), daemon=True).start()
                 elif t == "dropAttach" and ch:
                     self.pending_attach.pop(ch, None)
                 elif t == "reactors" and ch and cmd.get("ts"):

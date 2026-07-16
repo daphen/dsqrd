@@ -30,6 +30,7 @@
           makeWrapper ${pkgs.python3}/bin/python3 $out/bin/dsqrd \
             --add-flags "$out/share/dsqrd/dsqrd.py" \
             --prefix PYTHONPATH : "$PYTHONPATH" \
+            --prefix PATH : "${pkgs.lib.makeBinPath [ pkgs.ffmpeg pkgs.imagemagick ]}" \
             --set DSQRD_REV "${self.rev or ""}" \
             --chdir "$out/share/dsqrd"
           runHook postInstall
