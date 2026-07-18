@@ -10,12 +10,16 @@ but does not send, edit, react, or mark anything.
     python3 dqs.py          # connects via your stored Discord token
     socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/dqs.sock   # eyeball the stream
 """
+import array
 import atexit
+import base64
 import faulthandler
 import json
+import math
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -247,6 +251,25 @@ def map_embeds(m, content):
                 imgs.append({"path": thumb, "full": vurl, "w": hw[1] or 0, "h": hw[0] or 0,
                              "id": mid, "ext": ext, "type": "video", "pending": False})
             continue
+        # uploaded audio: voice messages arrive as audio/ogg attachments with
+        # duration+waveform (flags bit 8192 on the raw message); plain audio
+        # file uploads land here too. Render a playable pill; `v` downloads
+        # and plays via media-viewer.sh -> mpv.
+        if t.startswith("audio/"):
+            aurl = url or proxy or main
+            if aurl:
+                cu = _clean(aurl).lower()
+                ext = "ogg"
+                for cand in ("ogg", "opus", "mp3", "m4a", "wav", "flac"):
+                    if cu.endswith("." + cand):
+                        ext = cand
+                        break
+                imgs.append({"path": "", "full": aurl, "w": 0, "h": 0, "id": mid,
+                             "ext": ext, "type": "audio", "pending": False,
+                             "name": e.get("name") or "",
+                             "duration": int(round(e.get("duration_secs") or 0)),
+                             "waveform": e.get("waveform") or ""})
+            continue
         # link/media embed whose main image is a real image (unfurl image)
         if main and _looks_image(main):
             gif = _clean(main).endswith((".gif", ".apng"))
@@ -308,6 +331,34 @@ def map_embeds(m, content):
             if u and u != (content or "").strip() and not (prose and prose[:40] in (content or "")):
                 unfurls.append(u)
     return imgs, unfurls
+
+
+def _voice_meta(path):
+    """Duration + Discord waveform (base64 u8 RMS buckets) for a voice note.
+    Stdlib+ffmpeg only — dchat's helper needs numpy/soundfile, not in our env."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", path],
+        capture_output=True, text=True).stdout.strip()
+    duration = float(out or 0)
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", path, "-f", "s16le", "-ac", "1", "-ar", "8000", "-"],
+        capture_output=True).stdout
+    samples = array.array("h")
+    samples.frombytes(raw[: len(raw) // 2 * 2])
+    if not samples or not duration:
+        return "", duration
+    n = min(max(int(duration * 10), 32), 256)
+    chunk = max(1, len(samples) // n)
+    rms = []
+    for i in range(n):
+        seg = samples[i * chunk:(i + 1) * chunk]
+        if not seg:
+            break
+        rms.append(math.sqrt(sum(s * s for s in seg) / len(seg)))
+    peak = max(rms) or 1.0
+    wf = bytes(min(255, int(v / peak * 255)) for v in rms)
+    return base64.b64encode(wf).decode(), duration
 
 
 def initials(name):
@@ -442,6 +493,15 @@ class DQS:
         self.user_names = {}      # user id -> display name (for DM typing indicators)
         self.pending_attach = {}  # channel id -> uploaded attachment, sent with next message
         self.uploading = {}       # channel id -> Event set when an in-flight upload finishes
+        self.voice_proc = None    # ffmpeg recording process while a voice note is being taken
+        self.voice_channel = None
+        self.voice_path = "/tmp/dsqrd-voice.ogg"
+        self.voice_lock = threading.Lock()   # start/stop race → orphaned ffmpeg recorders
+        self.play_proc = None     # ffplay process while a voice note plays in-line
+        self.play_id = None       # message id being played (UI accents its pill)
+        self.play_lock = threading.Lock()
+        atexit.register(lambda: self.voice_proc and self.voice_proc.kill())
+        atexit.register(lambda: self.play_proc and self.play_proc.kill())
         self.conns = []
         self.lock = threading.Lock()
         self.update_event = None   # latest updateAvailable event, replayed to new clients
@@ -737,6 +797,115 @@ class DQS:
                 print(f"dsqrd: view error {e!r}", flush=True)
         if paths:
             self.write(conn, {"type": "viewReady", "paths": paths, "mediatype": mediatype})
+
+    def voice_start(self, conn, channel_id):
+        """Record a voice note off the default input (ffmpeg → ogg/opus)."""
+        with self.voice_lock:
+            if not channel_id or self.voice_proc:
+                return
+            try:
+                os.remove(self.voice_path)
+            except OSError:
+                pass
+            try:
+                # -t caps a forgotten recording; SIGINT on stop finalizes the ogg
+                proc = subprocess.Popen(
+                    ["ffmpeg", "-y", "-v", "error", "-f", "pulse", "-i", "default",
+                     "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "48k",
+                     "-t", "600", self.voice_path],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                self.write(conn, {"type": "toast", "text": "voice: ffmpeg not available"})
+                return
+            self.voice_proc, self.voice_channel = proc, channel_id
+        self.broadcast({"type": "voice", "state": "recording", "channel": channel_id})
+        time.sleep(0.25)   # ffmpeg exits instantly when there's no input source
+        if proc.poll() is not None and self.voice_proc is proc:
+            self.voice_proc = None
+            self.broadcast({"type": "voice", "state": "idle"})
+            self.write(conn, {"type": "toast", "text": "voice: recording failed (no input source?)"})
+
+    def voice_stop(self, conn, send):
+        """Stop the running recording; send it as a Discord voice message or discard."""
+        with self.voice_lock:
+            proc = self.voice_proc
+            if not proc:
+                return
+            self.voice_proc = None
+            ch = self.voice_channel
+        try:
+            if proc.poll() is None:
+                proc.send_signal(signal.SIGINT)
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        if not send:
+            self.broadcast({"type": "voice", "state": "idle"})
+            try:
+                os.remove(self.voice_path)
+            except OSError:
+                pass
+            return
+        self.broadcast({"type": "voice", "state": "sending"})
+        try:
+            if not (os.path.exists(self.voice_path) and os.path.getsize(self.voice_path) > 0):
+                self.write(conn, {"type": "toast", "text": "voice: nothing recorded"})
+                return
+            waveform, duration = _voice_meta(self.voice_path)
+            if duration < 1:
+                self.write(conn, {"type": "toast", "text": "voice: too short — not sent"})
+                return
+            if not self.discord.send_voice_message(ch, self.voice_path, waveform=waveform, duration=duration):
+                self.write(conn, {"type": "toast", "text": "voice: send failed"})
+        finally:
+            self.broadcast({"type": "voice", "state": "idle"})
+            try:
+                os.remove(self.voice_path)
+            except OSError:
+                pass
+
+    def play_audio(self, conn, msg_id, url, ext):
+        """Play a voice note / audio attachment in-line (no window): download to
+        the view cache, play daemon-side via ffplay. The UI accents the pill off
+        the playback events; v again or q stops."""
+        viewdir = os.path.expanduser("~/.cache/dsqrd/view")
+        os.makedirs(viewdir, exist_ok=True)
+        dest = os.path.join(viewdir, f"{msg_id}-a.{ext or 'ogg'}")
+        try:
+            if not os.path.exists(dest):
+                req = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
+                with urllib.request.urlopen(req, timeout=20) as r, open(dest, "wb") as f:
+                    f.write(r.read())
+        except Exception as e:
+            print(f"dsqrd: play fetch error {e!r}", flush=True)
+            self.write(conn, {"type": "toast", "text": "couldn't fetch audio"})
+            return
+        with self.play_lock:
+            if self.play_proc and self.play_proc.poll() is None:
+                self.play_proc.terminate()   # its watcher broadcasts the old idle
+            try:
+                proc = subprocess.Popen(
+                    ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", dest],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                self.write(conn, {"type": "toast", "text": "ffplay not available"})
+                return
+            self.play_proc, self.play_id = proc, msg_id
+        self.broadcast({"type": "playback", "state": "playing", "id": msg_id})
+        threading.Thread(target=self._watch_play, args=(proc, msg_id), daemon=True).start()
+
+    def _watch_play(self, proc, msg_id):
+        proc.wait()
+        with self.play_lock:
+            if self.play_proc is not proc:
+                return   # superseded by a newer play
+            self.play_proc = self.play_id = None
+        self.broadcast({"type": "playback", "state": "idle", "id": msg_id})
+
+    def play_stop(self):
+        with self.play_lock:
+            if self.play_proc and self.play_proc.poll() is None:
+                self.play_proc.terminate()   # watcher does cleanup + idle broadcast
 
     def set_presence(self, active):
         """Report desktop activity to Discord's gateway (op 3). afk=False while
@@ -1077,6 +1246,15 @@ class DQS:
                     threading.Thread(target=self.do_view, args=(conn, imgs, cmd.get("mediatype", "img")), daemon=True).start()
                 elif t == "presence":
                     threading.Thread(target=self.set_presence, args=(cmd.get("state") != "idle",), daemon=True).start()
+                elif t == "play" and cmd.get("url"):
+                    threading.Thread(target=self.play_audio,
+                                     args=(conn, str(cmd.get("id") or "a"), cmd["url"], cmd.get("ext", "")), daemon=True).start()
+                elif t == "playStop":
+                    threading.Thread(target=self.play_stop, daemon=True).start()
+                elif t == "voiceStart" and ch:
+                    threading.Thread(target=self.voice_start, args=(conn, ch), daemon=True).start()
+                elif t == "voiceStop":
+                    threading.Thread(target=self.voice_stop, args=(conn, bool(cmd.get("send"))), daemon=True).start()
                 elif t == "uploadClipboard" and ch:
                     # Register the upload synchronously so a "send" read next waits
                     # for the staged image instead of racing past it (text-only).

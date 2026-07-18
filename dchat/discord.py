@@ -1625,9 +1625,10 @@ class Discord():
         return False
 
 
-    def send_voice_message(self, channel_id, path, reply_id=None, reply_channel_id=None, reply_guild_id=None, reply_ping=None):
+    def send_voice_message(self, channel_id, path, reply_id=None, reply_channel_id=None, reply_guild_id=None, reply_ping=None, waveform=None, duration=None):
         """Send voice message from file path, file must be ogg"""
-        waveform, duration = utils.get_audio_waveform(path)
+        if waveform is None:
+            waveform, duration = utils.get_audio_waveform(path)
         if not duration:
             logger.warning(f"Couldn't read voice message file: {path}")
         upload_data, status = self.request_attachment_url(channel_id, path, custom_name="voice-message.ogg")

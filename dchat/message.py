@@ -234,6 +234,8 @@ def prepare_message(message):
             "url": attachment["url"],
             "proxy_url": attachment.get("proxy_url"),
             "hw": (attachment["height"], attachment["width"]) if "height" in attachment else None,
+            "duration_secs": attachment.get("duration_secs"),
+            "waveform": attachment.get("waveform"),
         })   # keep attachments in same place as embeds (attachments have no "main_url")
     message, embeds = content_to_attachment(message, embeds)
     # mentions
