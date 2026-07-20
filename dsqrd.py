@@ -15,6 +15,7 @@ import atexit
 import base64
 import faulthandler
 import hashlib
+import html as _html
 import json
 import math
 import os
@@ -32,6 +33,7 @@ import time
 faulthandler.enable()
 atexit.register(lambda: print("dsqrd: process exiting", flush=True))
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 
@@ -211,6 +213,39 @@ def _qt_img(url):
     if url and ".webp" in _clean(url).lower() and re.search(r"(?:images-ext-\d+|media)\.discordapp\.net/", url):
         return url + ("&" if "?" in url else "?") + "format=png"
     return url
+
+
+SPOTIFY_RE = re.compile(r"https?://open\.spotify\.com/(?:intl-[a-z]+/)?(?:track|album|playlist|artist|episode|show)/[A-Za-z0-9]+[^\s]*")
+_OEMBED_CACHE = {}
+
+
+def _spotify_meta(url):
+    """Song, artist, and album art for a Spotify link from its page's OpenGraph
+    tags (no auth). Discord attaches embeds for album links but NOT track links
+    (it renders those client-side), so we fetch the metadata ourselves. The
+    og:description is "Artist · Album · Song · Year" — its first field is the
+    artist. Cached (incl. failures)."""
+    key = url.split("?")[0]
+    if key in _OEMBED_CACHE:
+        return _OEMBED_CACHE[key]
+    res = None
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            page = r.read(80000).decode("utf-8", "ignore")   # og tags live in <head>
+
+        def og(prop):
+            m = re.search(r'<meta property="' + prop + r'" content="([^"]*)"', page)
+            return _html.unescape(m.group(1)) if m else ""
+
+        title, art, desc = og("og:title"), og("og:image"), og("og:description")
+        artist = desc.split("·")[0].strip() if "·" in desc else ""
+        if title:
+            res = {"title": title, "artist": artist, "art": art}
+    except Exception:
+        res = None
+    _OEMBED_CACHE[key] = res
+    return res
 
 
 def _fetch_text(url, cap=64 * 1024, show=4000):
@@ -482,6 +517,20 @@ def map_msg(m):
             rt = "(deleted message)"
         reply_text = rt[:90]
     imgs, unfurls = map_embeds(m, content)
+    # Spotify links Discord left un-embedded (track links especially — it renders
+    # those client-side) get a card synthesized from Spotify's oEmbed metadata.
+    if "open.spotify.com" in content:
+        carded = {i.get("full", "").split("?")[0] for i in imgs if i.get("type") == "music"}
+        for mo in SPOTIFY_RE.finditer(content):
+            u = mo.group(0)
+            if u.split("?")[0] in carded:
+                continue
+            meta = _spotify_meta(u)
+            if meta:
+                imgs.append({"type": "music", "art": meta.get("art", ""), "title": meta.get("title", ""),
+                             "artist": meta.get("artist", ""), "provider": "Spotify", "path": "", "full": u,
+                             "w": 0, "h": 0, "id": str(m.get("id", "")) + "-sp" + str(len(imgs)), "pending": False})
+                carded.add(u.split("?")[0])
     body = content
     # a lone link that unfurled into an inline card/media (Spotify, gif, image)
     # doesn't also need its raw URL shown as text — render just the card. `link`
