@@ -1342,11 +1342,25 @@ class DQS:
             self.queue_gifv(cid, mm)
             if op != "MESSAGE_UPDATE":
                 self.maybe_notify(m, cid, ws)
+                self.maybe_mark_active_read(cid, m)
         elif op == "MESSAGE_DELETE":
             self.broadcast({"type": "delete", "channel": cid, "ts": str(m.get("id"))})
         elif op in ("MESSAGE_REACTION_ADD", "MESSAGE_REACTION_REMOVE"):
             threading.Thread(target=self.refresh_reactions,
                              args=(cid, m.get("id")), daemon=True).start()
+
+    def maybe_mark_active_read(self, cid, m):
+        """Ack a live message on the server when it lands in the channel you're
+        actively viewing with the window focused — so reading on desktop clears
+        the unread on your phone too. Without this the client only acked on
+        channel-open, leaving messages read on desktop still badging mobile."""
+        if str(m.get("user_id")) == str(self.my_id):
+            return
+        if not (self.app_active and cid == self.active_ch):
+            return
+        mid = m.get("id")
+        if mid:
+            threading.Thread(target=self.discord.ack, args=(cid, str(mid)), daemon=True).start()
 
     def maybe_notify(self, m, cid, ws):
         """Fire a desktop notification for DMs and @mentions, unless it's the
