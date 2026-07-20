@@ -280,6 +280,12 @@ def map_embeds(m, content):
                 imgs.append({"path": thumb, "full": vurl, "w": hw[1] or 0, "h": hw[0] or 0,
                              "id": mid, "ext": ext, "type": "video", "pending": False})
             continue
+        # music unfurl (Spotify …): structured card — art + title + artist
+        if t == "music":
+            imgs.append({"type": "music", "art": proxy or main, "title": e.get("title", ""),
+                         "artist": e.get("artist", ""), "provider": e.get("provider", "Spotify"),
+                         "path": "", "full": main or "", "w": 0, "h": 0, "id": mid, "pending": False})
+            continue
         # uploaded audio: voice messages arrive as audio/ogg attachments with
         # duration+waveform (flags bit 8192 on the raw message); plain audio
         # file uploads land here too. Render a playable pill; `v` downloads

@@ -41,6 +41,25 @@ def prepare_embeds(embeds, message_content):
         media = []
         embed_type = embed.get("type", "unknown")
 
+        # music services (Spotify/Apple Music/SoundCloud): emit a structured card
+        # (art + title + artist) instead of folding title into text + a big square.
+        prov_name = (embed.get("provider") or {}).get("name", "")
+        eurl = embed.get("url", "")
+        if prov_name in ("Spotify", "SoundCloud", "Apple Music", "Deezer", "TIDAL", "Bandcamp") \
+                or "open.spotify.com" in eurl or "music.apple.com" in eurl:
+            thumb = embed.get("thumbnail") or {}
+            ready_embeds.append({
+                "type": "music", "name": None, "url": "", "main_url": eurl,
+                "proxy_url": thumb.get("proxy_url") or thumb.get("url") or "",
+                "hw": (thumb.get("height", 0), thumb.get("width", 0)), "video_url": None,
+                "provider": prov_name or "Spotify",
+                "title": embed.get("title", ""),
+                "artist": (embed.get("author") or {}).get("name", "") or "",
+            })
+            # keep the link in the body: `o` opens it (spotify-player) and Discord
+            # itself shows link-plus-card too
+            continue
+
         if "url" in embed and "tenor.com/" not in embed["url"] and "giphy.com/" not in embed["url"]:
             # dont repeat unless its not discord attachment and handle x=twitter
             if (embed_type != "rich" and ".discordapp." not in embed["url"]) or embed["url"] not in message_content.replace("https://x.com", "https://twitter.com"):
