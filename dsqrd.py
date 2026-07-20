@@ -483,8 +483,13 @@ def map_msg(m):
         reply_text = rt[:90]
     imgs, unfurls = map_embeds(m, content)
     body = content
+    # a lone link that unfurled into an inline card/media (Spotify, gif, image)
+    # doesn't also need its raw URL shown as text — render just the card. `link`
+    # is still derived from the original content below, so `o` opens it.
+    if imgs and re.sub(r"https?://\S+", "", content).strip() == "":
+        body = ""
     if unfurls:
-        body = (body + "\n" + "\n".join(unfurls)).strip()
+        body = (body + ("\n" if body else "") + "\n".join(unfurls)).strip()
     rx = []
     for r in m.get("reactions", []) or []:
         eid = r.get("emoji_id")
