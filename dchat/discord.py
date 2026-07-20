@@ -1491,12 +1491,40 @@ class Discord():
             gifs = []
             for gif in data:
                 gifs.append({
+                    "id": gif.get("id", ""),
+                    "title": gif.get("title", ""),
                     "url": gif["url"],
                     "webm": gif["src"],
                     "gif": gif["gif_src"],
+                    "width": gif.get("width", 0),
+                    "height": gif.get("height", 0),
                 })
             return gifs
         log_api_error(data, status, "search_gifs")
+        return []
+
+
+    def trending_gifs(self):
+        """Trending gifs — the gif picker's empty-query state."""
+        url = "/api/v9/gifs/trending?media_format=webm&provider=tenor&locale=en-US"
+        data, status = self.request("GET", url, None, self.header)
+        if not status:
+            return []
+        if status == 200:
+            data = json.loads(data)
+            gifs = []
+            for gif in data.get("gifs", []):
+                gifs.append({
+                    "id": gif.get("id", ""),
+                    "title": gif.get("title", ""),
+                    "url": gif["url"],
+                    "webm": gif["src"],
+                    "gif": gif["gif_src"],
+                    "width": gif.get("width", 0),
+                    "height": gif.get("height", 0),
+                })
+            return gifs
+        log_api_error(data, status, "trending_gifs")
         return []
 
 

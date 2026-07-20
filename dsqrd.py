@@ -14,6 +14,7 @@ import array
 import atexit
 import base64
 import faulthandler
+import hashlib
 import json
 import math
 import os
@@ -309,7 +310,8 @@ def map_embeds(m, content):
                 # Discord proxies the mp4 — render the video card: transcoded
                 # poster inline, `v` plays the proxied stream in mpv.
                 imgs.append({"path": _qt_img(media), "full": vurl, "w": hw[1] or 0, "h": hw[0] or 0,
-                             "id": mid, "ext": "mp4", "type": "video", "pending": False})
+                             "id": mid, "ext": "mp4", "type": "video", "pending": False,
+                             "gifv": True})   # upgradeable: queue_gifv converts to an inline gif
             elif media and _looks_image(media):
                 # Static thumbnail (YouTube .jpg) → Image; routing stills through
                 # AnimatedImage made a later embed reuse an earlier one's frame.
@@ -522,6 +524,8 @@ class DQS:
         self.play_proc = None     # ffplay process while a voice note plays in-line
         self.play_id = None       # message id being played (UI accents its pill)
         self.play_lock = threading.Lock()
+        self.gif_gen = 0          # newest gif-browser request; stale conversions bail
+        self._gifv_busy = set()   # inline-gif conversions in flight (dest paths)
         atexit.register(lambda: self.voice_proc and self.voice_proc.kill())
         atexit.register(lambda: self.play_proc and self.play_proc.kill())
         self.conns = []
@@ -699,6 +703,8 @@ class DQS:
         for m in msgs:
             self.learn_participant(channel_id, m)
         out = [map_msg(m) for m in msgs]
+        for mm in out:
+            self.queue_gifv(channel_id, mm)
         out.reverse()  # API returns newest-first; client wants chronological
         if not out:
             self.write(conn, {"type": "recent", "channel": channel_id, "msgs": [], "reset": True, "final": True})
@@ -717,6 +723,8 @@ class DQS:
     def send_history(self, conn, channel_id, before):
         msgs = self.discord.get_messages(channel_id, num=50, before=before) or []
         out = [map_msg(m) for m in msgs]
+        for mm in out:
+            self.queue_gifv(channel_id, mm)
         out.reverse()
         self.write(conn, {"type": "history", "channel": channel_id, "msgs": out})
 
@@ -885,6 +893,115 @@ class DQS:
                 os.remove(self.voice_path)
             except OSError:
                 pass
+
+    def queue_gifv(self, channel_id, mm):
+        """Upgrade gifv video-cards (KLIPY & co.) to inline animated gifs: the
+        card shows immediately, the proxied stream converts to a local gif off
+        this thread, then the message's images are live-replaced (the same
+        `images` mechanism slqs uses for unfurl updates)."""
+        try:
+            imgs = json.loads(mm.get("imagesJson") or "[]")
+        except Exception:
+            return
+        if any(i.get("gifv") for i in imgs):
+            threading.Thread(target=self._gifv_convert, args=(channel_id, mm["ts"], imgs), daemon=True).start()
+
+    def _gifv_convert(self, channel_id, ts, imgs):
+        d = os.path.expanduser("~/.cache/dsqrd/gifpicker")
+        os.makedirs(d, exist_ok=True)
+        changed = False
+        for i in imgs:
+            if not i.get("gifv"):
+                continue
+            key = hashlib.md5(i["full"].encode()).hexdigest()[:16] + "-inline"
+            dest = os.path.join(d, key + ".gif")
+            if not os.path.exists(dest):
+                if dest in self._gifv_busy:
+                    # another message shares this gif — wait for that conversion
+                    for _ in range(60):
+                        if os.path.exists(dest):
+                            break
+                        time.sleep(0.25)
+                    if not os.path.exists(dest):
+                        continue
+                else:
+                    self._gifv_busy.add(dest)
+                    src = os.path.join(d, key + ".src")
+                    try:
+                        req = urllib.request.Request(i["full"], headers={"User-Agent": self.user_agent})
+                        with urllib.request.urlopen(req, timeout=20) as r, open(src, "wb") as f:
+                            f.write(r.read())
+                        p = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", src,
+                                            "-vf", "fps=15,scale=-2:280", "-loop", "0", dest],
+                                           capture_output=True)
+                        if p.returncode != 0 or not os.path.exists(dest):
+                            continue
+                    except Exception as e:
+                        print(f"dsqrd: gifv convert error {e!r}", flush=True)
+                        continue
+                    finally:
+                        self._gifv_busy.discard(dest)
+                        try:
+                            os.remove(src)
+                        except OSError:
+                            pass
+            u = "file://" + dest
+            i.update({"type": "gif", "path": u, "full": u, "ext": ""})
+            i.pop("gifv", None)
+            changed = True
+        if changed:
+            self.broadcast({"type": "images", "channel": channel_id, "ts": ts,
+                            "imagesJson": json.dumps(imgs)})
+
+    def do_gifs(self, conn, q, gen):
+        """GIF browser (/gif in the composer): Discord's /gifs API (KLIPY-backed).
+        The result list goes out immediately; previews convert webm -> small gif
+        (this Qt can't decode klipy's animated webp) and stream in progressively."""
+        from concurrent.futures import ThreadPoolExecutor
+        self.gif_gen = gen
+        d = os.path.expanduser("~/.cache/dsqrd/gifpicker")
+        os.makedirs(d, exist_ok=True)
+        try:   # keep the preview cache bounded
+            fs = sorted((os.path.join(d, f) for f in os.listdir(d)), key=os.path.getmtime)
+            for f in fs[:-300]:
+                os.remove(f)
+        except OSError:
+            pass
+        items = (self.discord.search_gifs(q) if q else self.discord.trending_gifs())[:24]
+        out = [{"id": g["id"] or g["url"], "title": g["title"], "url": g["url"],
+                "w": g["width"], "h": g["height"]} for g in items]
+        self.write(conn, {"type": "gifs", "gen": gen, "items": out})
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            for g in items:
+                ex.submit(self._gif_preview, conn, gen, d, g)
+
+    def _gif_preview(self, conn, gen, cachedir, g):
+        if self.gif_gen != gen or not g.get("webm"):
+            return
+        key = hashlib.md5(g["webm"].encode()).hexdigest()[:16]
+        dest = os.path.join(cachedir, key + ".gif")
+        if not os.path.exists(dest):
+            src = os.path.join(cachedir, key + ".webm")
+            try:
+                req = urllib.request.Request(g["webm"], headers={"User-Agent": self.user_agent})
+                with urllib.request.urlopen(req, timeout=15) as r, open(src, "wb") as f:
+                    f.write(r.read())
+                p = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", src,
+                                    "-vf", "fps=12,scale=-2:180", "-loop", "0", dest],
+                                   capture_output=True)
+                if p.returncode != 0 or not os.path.exists(dest):
+                    return
+            except Exception as e:
+                print(f"dsqrd: gif preview error {e!r}", flush=True)
+                return
+            finally:
+                try:
+                    os.remove(src)
+                except OSError:
+                    pass
+        if self.gif_gen == gen:
+            self.write(conn, {"type": "gifPreview", "gen": gen,
+                              "id": g["id"] or g["url"], "path": "file://" + dest})
 
     def play_audio(self, conn, msg_id, url, ext):
         """Play a voice note / audio attachment in-line (no window): download to
@@ -1130,8 +1247,10 @@ class DQS:
         if op in ("MESSAGE_CREATE", "MESSAGE_CREATE_QUICK", "MESSAGE_UPDATE"):
             if self.learn_participant(cid, m) and cid == self.active_ch:
                 self.broadcast({"type": "users", "users": self.users_payload(cid)})
+            mm = map_msg(m)
             self.broadcast({"type": "message", "workspace": ws, "channel": cid,
-                            "thread": "", "mention": False, "msg": map_msg(m)})
+                            "thread": "", "mention": False, "msg": mm})
+            self.queue_gifv(cid, mm)
             if op != "MESSAGE_UPDATE":
                 self.maybe_notify(m, cid, ws)
         elif op == "MESSAGE_DELETE":
@@ -1268,6 +1387,9 @@ class DQS:
                     threading.Thread(target=self.do_view, args=(conn, imgs, cmd.get("mediatype", "img")), daemon=True).start()
                 elif t == "presence":
                     threading.Thread(target=self.set_presence, args=(cmd.get("state") != "idle",), daemon=True).start()
+                elif t == "gifs":
+                    threading.Thread(target=self.do_gifs,
+                                     args=(conn, str(cmd.get("q") or "").strip(), int(cmd.get("gen") or 0)), daemon=True).start()
                 elif t == "play" and cmd.get("url"):
                     threading.Thread(target=self.play_audio,
                                      args=(conn, str(cmd.get("id") or "a"), cmd["url"], cmd.get("ext", "")), daemon=True).start()
