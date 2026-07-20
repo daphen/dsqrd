@@ -43,6 +43,19 @@ SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "dsqrd.sock")
 GIT_REV = os.environ.get("DSQRD_REV", "")   # baked build rev; empty on source runs
 
 
+def _have_ffmpeg():
+    """ffmpeg + ffprobe are hard runtime deps for gifs and voice notes: the
+    daemon transcodes provider webm/mp4 to gif (this Qt decodes neither), builds
+    voice waveforms, and records. The flake bundles them onto PATH; a bare
+    source run must supply them. Cached; re-probes only while still missing so a
+    late PATH fix is picked up without a restart."""
+    if getattr(_have_ffmpeg, "_ok", False):
+        return True
+    ok = bool(shutil.which("ffmpeg")) and bool(shutil.which("ffprobe"))
+    _have_ffmpeg._ok = ok
+    return ok
+
+
 def _data_dir():
     base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
     d = os.path.join(base, "dsqrd")
@@ -899,6 +912,8 @@ class DQS:
         card shows immediately, the proxied stream converts to a local gif off
         this thread, then the message's images are live-replaced (the same
         `images` mechanism slqs uses for unfurl updates)."""
+        if not _have_ffmpeg():
+            return   # leaves the (still-useful) video card; do_gifs warns loudly
         try:
             imgs = json.loads(mm.get("imagesJson") or "[]")
         except Exception:
@@ -958,6 +973,11 @@ class DQS:
         The result list goes out immediately; previews convert webm -> small gif
         (this Qt can't decode klipy's animated webp) and stream in progressively."""
         from concurrent.futures import ThreadPoolExecutor
+        if not _have_ffmpeg():
+            self.write(conn, {"type": "gifs", "gen": gen, "items": []})
+            self.write(conn, {"type": "toast", "text": "GIFs need ffmpeg — it's missing from the daemon's PATH"})
+            print("dsqrd: ffmpeg/ffprobe not found — GIF browser and inline gifs disabled", flush=True)
+            return
         self.gif_gen = gen
         d = os.path.expanduser("~/.cache/dsqrd/gifpicker")
         os.makedirs(d, exist_ok=True)
@@ -1428,6 +1448,9 @@ class DQS:
         srv.bind(SOCK)
         srv.listen(8)
         print(f"dsqrd: streaming on {SOCK}", flush=True)
+        if not _have_ffmpeg():
+            print("dsqrd: WARNING — ffmpeg/ffprobe not on PATH; GIFs and voice "
+                  "messages will not work. Install the flake build or add ffmpeg.", flush=True)
         while True:
             conn, _ = srv.accept()
             with self.lock:
