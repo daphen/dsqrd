@@ -807,6 +807,31 @@ class DQS:
         out.reverse()
         self.write(conn, {"type": "history", "channel": channel_id, "msgs": out})
 
+    def do_profile(self, conn, user_id, ws):
+        """Fetch a Discord user's profile card (P in the client). Maps to the
+        same `profile` event slqs emits — the shared ProfilePanel shows whichever
+        fields are set, so Discord's bio/pronouns fill in and slqs-only fields
+        (title/email/phone/tz) stay empty and hidden."""
+        try:
+            u = self.discord.get_user(user_id, extra=True)
+        except Exception as e:
+            print(f"dsqrd: profile fetch error {e!r}", flush=True)
+            u = None
+        if not u:
+            self.write(conn, {"type": "toast", "text": "Couldn't load profile"})
+            return
+        extra = u.get("extra") or {}
+        name = u.get("global_name") or u.get("username") or "someone"
+        prof = {
+            "name": name, "realName": "", "handle": u.get("username") or "",
+            "title": "", "email": "", "phone": "", "tz": "", "tzOffset": None,
+            "statusText": "", "statusEmoji": self._status_snap.get(str(user_id), ""),
+            "avatar": avatar_url(u.get("id"), extra.get("avatar")),
+            "isBot": bool(u.get("bot")),
+            "bio": u.get("bio") or "", "pronouns": u.get("pronouns") or "",
+        }
+        self.write(conn, {"type": "profile", "workspace": ws, "user": str(u.get("id") or user_id), "profile": prof})
+
     def do_reactors(self, channel_id, ts, emojis):
         """Fetch who reacted (Discord's gateway omits the user list). One API call
         per emoji; custom emoji need the name:id form."""
@@ -1552,6 +1577,9 @@ class DQS:
                 elif t == "reactors" and ch and cmd.get("ts"):
                     threading.Thread(target=self.do_reactors,
                                      args=(ch, cmd["ts"], cmd.get("emojis") or []), daemon=True).start()
+                elif t == "profile" and cmd.get("user"):
+                    threading.Thread(target=self.do_profile,
+                                     args=(conn, str(cmd["user"]), cmd.get("workspace", "")), daemon=True).start()
                 # focus is a no-op (tracked above for notification suppression)
         self.drop(conn)
 
