@@ -136,6 +136,26 @@ def avatar_url(user_id, avatar_hash):
     return f"{CDN}/avatars/{user_id}/{avatar_hash}.png?size=64"
 
 
+def banner_url(user_id, banner_hash):
+    if not user_id or not banner_hash:
+        return ""
+    ext = "gif" if str(banner_hash).startswith("a_") else "png"
+    return f"{CDN}/banners/{user_id}/{banner_hash}.{ext}?size=480"
+
+
+DISCORD_EPOCH = 1420070400000
+
+
+def snowflake_date(user_id):
+    """Account-creation date encoded in a Discord snowflake id."""
+    try:
+        ms = (int(user_id) >> 22) + DISCORD_EPOCH
+    except (TypeError, ValueError):
+        return ""
+    t = time.gmtime(ms / 1000)
+    return time.strftime("%b %-d, %Y", t)
+
+
 AVATAR_CACHE = os.path.expanduser("~/.cache/dsqrd/avatars")
 
 
@@ -822,15 +842,59 @@ class DQS:
             return
         extra = u.get("extra") or {}
         name = u.get("global_name") or u.get("username") or "someone"
+        uid = str(u.get("id") or user_id)
+        pres, activity = self._presence_activity(uid)
+        # dedupe connected accounts by service, keep the visible name
+        seen, conns = set(), []
+        for c in (u.get("connected_accounts") or []):
+            svc = (c.get("type") or "").strip()
+            if not svc or svc in seen:
+                continue
+            seen.add(svc)
+            label = svc[:1].upper() + svc[1:]
+            nm = c.get("name") or ""
+            conns.append(f"{label}: {nm}" if nm and nm.lower() != svc.lower() else label)
+        ban = u.get("banner")
         prof = {
             "name": name, "realName": "", "handle": u.get("username") or "",
             "title": "", "email": "", "phone": "", "tz": "", "tzOffset": None,
-            "statusText": "", "statusEmoji": self._status_snap.get(str(user_id), ""),
+            "statusText": "",
+            "statusEmoji": self._status_snap.get(uid, ""),
             "avatar": avatar_url(u.get("id"), extra.get("avatar")),
             "isBot": bool(u.get("bot")),
             "bio": u.get("bio") or "", "pronouns": u.get("pronouns") or "",
+            "banner": banner_url(uid, ban) if ban else "",
+            "created": snowflake_date(uid),
+            "connections": "  ·  ".join(conns),
+            "presence": pres, "activity": activity,
         }
-        self.write(conn, {"type": "profile", "workspace": ws, "user": str(u.get("id") or user_id), "profile": prof})
+        self.write(conn, {"type": "profile", "workspace": ws, "user": uid, "profile": prof})
+
+    def _presence_activity(self, uid):
+        """(status, activity-line) for a user from the gateway's DM presence
+        list. status is online/idle/dnd/offline; activity is a human line like
+        'Listening to Spotify — Song by Artist' or 'Playing Foo', or ''."""
+        try:
+            acts = self.gateway.get_dm_activities() or []
+        except Exception:
+            return "", ""
+        for a in acts:
+            if str(a.get("id") or "") != uid:
+                continue
+            status = a.get("status") or ""
+            line = ""
+            for act in (a.get("activities") or []):
+                if act.get("type") == 2:   # listening (Spotify)
+                    song, artist = act.get("details") or "", act.get("state") or ""
+                    line = f"Listening to {act.get('name') or 'music'}"
+                    if song:
+                        line += f" — {song}" + (f" by {artist}" if artist else "")
+                elif act.get("type") == 0:  # playing
+                    line = f"Playing {act.get('name') or ''}".strip()
+                if line:
+                    break
+            return status, line
+        return "", ""
 
     def do_reactors(self, channel_id, ts, emojis):
         """Fetch who reacted (Discord's gateway omits the user list). One API call
