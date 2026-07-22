@@ -1010,7 +1010,10 @@ class DQS:
             cached = os.path.join(viewdir, f"{im.get('id') or 'v'}-0.{ext}")
             if not os.path.exists(cached):
                 try:
-                    subprocess.Popen(["mpv", "--force-window=immediate", im["url"]],
+                    # size like media-viewer.sh's mpv (75%x85% of the screen) —
+                    # native-size windows are tiny for small recordings
+                    subprocess.Popen(["mpv", "--no-terminal", "--force-window=immediate",
+                                      "--autofit=75%x85%", "--loop", im["url"]],
                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     self.write(conn, {"type": "viewSpawned"})
                     return
