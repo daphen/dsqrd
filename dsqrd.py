@@ -666,12 +666,14 @@ class VoiceCall:
         return None
 
     def _kill_proc(self):
-        if self.proc:
-            try:
-                self.proc.terminate()
-            except Exception:
-                pass
-            self.proc = None
+        # setsid reparents Helium to init, so self.proc (the launcher) can't
+        # reach it — kill by the unique window class instead.
+        self.proc = None
+        try:
+            subprocess.run(["pkill", "-TERM", "-f", "class=dsqrd-voice"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
     # ---- public verbs (called from dispatch threads) ----
     def join(self, guild_id, channel_id):
@@ -680,15 +682,30 @@ class VoiceCall:
             gid = guild_id or "@me"
             self.channel_id = channel_id
             os.makedirs(VOICE_PROFILE, exist_ok=True)
+            # A hard-killed prior Helium leaves a stale SingletonLock; the next
+            # launch then hands off to a dead pid and exits instantly.
+            for f in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+                try:
+                    os.remove(os.path.join(VOICE_PROFILE, f))
+                except OSError:
+                    pass
             # helium lives in the user/system profile, not the daemon's Nix
             # closure — make sure it's on PATH for the spawn.
             env = dict(os.environ)
             env["PATH"] = "/etc/profiles/per-user/{}/bin:/run/current-system/sw/bin:{}".format(
                 os.environ.get("USER", ""), env.get("PATH", ""))
+            # setsid: helium's bwrap sets PR_SET_PDEATHSIG keyed to the parent
+            # thread, so it dies when this dispatch thread returns. Reparenting
+            # to init via setsid keeps it alive for the call's lifetime.
             self.proc = subprocess.Popen([
+                "setsid",
                 "helium", f"--app=https://discord.com/channels/{gid}/{channel_id}",
                 f"--user-data-dir={VOICE_PROFILE}", "--class=dsqrd-voice",
                 f"--remote-debugging-port={VOICE_CDP_PORT}",
+                # modern Chromium rejects CDP WebSocket handshakes with an
+                # Origin unless allow-listed; without this the attach fails and
+                # we tear the call straight back down. Loopback-only port, so *.
+                "--remote-allow-origins=*",
                 "--disable-backgrounding-occluded-windows",
                 "--disable-renderer-backgrounding",
                 "--disable-background-timer-throttling",
