@@ -146,6 +146,19 @@ def banner_url(user_id, banner_hash):
 
 DISCORD_EPOCH = 1420070400000
 
+SUMMARIZE_SYS = (
+    "You summarize a chat channel for someone who was away. Output GitHub-flavored "
+    "markdown in this exact shape:\n"
+    "1. One line starting with `**TL;DR:**` — a single sentence covering the whole span.\n"
+    "2. Then group the conversation into 2-5 thematic sections, each introduced by a "
+    "`## ` header of one or two words (e.g. Gaming, Work, Personal).\n"
+    "3. Under each header, a few concise bullets (`- `). Start every bullet with a "
+    "**bold lead** (the topic or person in **bold**), then ` — ` and the detail.\n"
+    "Write the summary in the SAME LANGUAGE the conversation is mostly in (match the "
+    "messages, not this instruction). Be concise; name who said what where it matters. "
+    "No preamble and no closing remarks."
+)
+
 
 def snowflake_date(user_id):
     """Account-creation date encoded in a Discord snowflake id."""
@@ -953,7 +966,16 @@ class DQS:
         # user tokens, so people who've messaged here is the honest set);
         # the unscoped bootstrap list only bridges until a channel opens.
         if channel_id is not None:
-            part = self.chan_users.get(channel_id, {})
+            part = dict(self.chan_users.get(channel_id, {}))
+            # Group DMs enumerate their full recipient list even for people who
+            # haven't messaged yet — include them so "from @name" is complete.
+            for dm in self.dms:
+                if dm.get("id") == channel_id:
+                    for r in (dm.get("recipients") or []):
+                        rid = str(r.get("id") or "")
+                        if rid:
+                            part[rid] = r.get("global_name") or r.get("username") or part.get(rid, "")
+                    break
             lst = [{"name": n, "id": uid} for uid, n in part.items() if n]
         else:
             lst = [{"name": n, "id": uid} for uid, n in self.user_names.items() if n]
@@ -1053,6 +1075,179 @@ class DQS:
             self.queue_gifv(channel_id, mm)
         out.reverse()
         self.write(conn, {"type": "history", "channel": channel_id, "msgs": out})
+
+    def _summarize_cfg(self):
+        """Provider config from ~/.config/dsqrd/profiles.json's "summarize" block:
+        {"base_url": "...", "model": "...", "api_key": "..."} (api_key optional for
+        local models). Any OpenAI-compatible /chat/completions endpoint works."""
+        try:
+            with open(os.path.expanduser("~/.config/dsqrd/profiles.json")) as f:
+                return (json.load(f) or {}).get("summarize") or {}
+        except Exception:
+            return {}
+
+    def _claude_cli(self, cfg, prompt):
+        # Keyless path: shells out to the `claude` CLI in print mode, which uses
+        # the user's Claude Code login (Max plan) — no API key, no per-token bill.
+        # The Nix closure lacks user-profile bins, so prepend them like voice does.
+        env = dict(os.environ)
+        env["PATH"] = "/etc/profiles/per-user/{}/bin:/run/current-system/sw/bin:{}/.local/bin:{}".format(
+            os.environ.get("USER", ""), os.path.expanduser("~"), env.get("PATH", ""))
+        cmd = ["claude", "-p"]
+        if cfg.get("model"):
+            cmd += ["--model", cfg["model"]]
+        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
+                           env=env, cwd="/tmp", timeout=180)
+        if r.returncode != 0:
+            raise RuntimeError((r.stderr or "claude -p failed").strip()[:200])
+        return (r.stdout or "").strip()
+
+    def _llm_summarize(self, cfg, transcript):
+        sysp = cfg.get("prompt") or SUMMARIZE_SYS   # override in profiles.json, no restart
+        if (cfg.get("provider") or "").lower() == "claude-cli":
+            return self._claude_cli(cfg, sysp + "\n\nChat transcript:\n" + transcript)
+        url = (cfg.get("base_url") or "").rstrip("/") + "/chat/completions"
+        body = json.dumps({
+            "model": cfg.get("model") or "gpt-4o-mini",
+            "max_tokens": 2048,
+            "messages": [
+                {"role": "system", "content": sysp},
+                {"role": "user", "content": transcript},
+            ],
+        }).encode()
+        req = urllib.request.Request(url, data=body, method="POST",
+                                     headers={"Content-Type": "application/json"})
+        if cfg.get("api_key"):
+            req.add_header("Authorization", "Bearer " + cfg["api_key"])
+        with urllib.request.urlopen(req, timeout=120) as r:
+            data = json.loads(r.read().decode())
+        return (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+
+    def _summ_line_text(self, m):
+        # Resolve Discord tokens to plain text for the transcript, so the model
+        # sees "@name" / ":emoji:" instead of raw <@id> / <:emoji:id> snowflakes.
+        content = m.get("content") or ""
+        names = {}
+        for u in (m.get("mentions") or []):
+            uid = str(u.get("id") or "")
+            if uid:
+                names[uid] = u.get("nick") or u.get("global_name") or u.get("username") or "someone"
+        content = re.sub(r"<@!?(\d+)>",
+                         lambda mt: "@" + (names.get(mt.group(1)) or self.user_names.get(mt.group(1)) or "someone"),
+                         content)
+        content = re.sub(r"<#(\d+)>", "#channel", content)
+        content = re.sub(r"<@&\d+>", "@role", content)
+        content = re.sub(r"<a?:([A-Za-z0-9_]+):\d+>", r":\1:", content)
+        return content.strip()
+
+    def _session_start(self, raw, gap_secs, anchor_idx=None):
+        """raw is oldest→newest. Returns the snowflake id of the first message of
+        the session (run with no > gap_secs silence between consecutive messages)
+        that CONTAINS raw[anchor_idx] — defaulting to the newest message, i.e. the
+        current session. Anchoring on a person's last message gives THEIR last
+        session even if they've gone quiet since. 0 if empty."""
+        if not raw:
+            return 0
+        idx = len(raw) - 1 if anchor_idx is None else anchor_idx
+        if idx < 0 or idx >= len(raw):
+            return 0
+        start = idx
+        while start > 0:
+            try:
+                prev = datetime.fromisoformat(raw[start - 1].get("timestamp"))
+                cur = datetime.fromisoformat(raw[start].get("timestamp"))
+            except Exception:
+                start -= 1
+                continue
+            if (cur - prev).total_seconds() > gap_secs:
+                break
+            start -= 1
+        try:
+            return int(raw[start].get("id") or 0)
+        except Exception:
+            return 0
+
+    def do_summarize(self, channel, scope, user):
+        """Gather the channel's in-scope messages (no local cache → live fetch,
+        bounded) and summarize them via the user-configured OpenAI-compatible
+        endpoint. Result broadcasts as a "summary" event; failures toast."""
+        cfg = self._summarize_cfg()
+        if (cfg.get("provider") or "").lower() != "claude-cli" and not cfg.get("base_url"):
+            self.broadcast({"type": "summaryError", "text":
+                "Summarize: add a \"summarize\" block to ~/.config/dsqrd/profiles.json"})
+            return
+        try:
+            # scope → a cutoff snowflake; keep messages with id greater than it.
+            cutoff = 0
+            if scope == "all_new":
+                try:
+                    rs = (self.gateway.get_read_state() or {}).get(channel) or {}
+                    cutoff = int(rs.get("last_acked_message_id") or 0)
+                except Exception:
+                    cutoff = 0
+            elif scope in ("last_day", "last_week"):
+                secs = 86400 if scope == "last_day" else 604800
+                unix_ms = int((time.time() - secs) * 1000)
+                cutoff = (unix_ms - DISCORD_EPOCH) << 22
+            # No message cache: page recent history (newest-first) up to a cap.
+            CAP = 300
+            raw, before = [], None
+            while len(raw) < CAP:
+                page = self.discord.get_messages(channel, num=100, before=before) or []
+                if not page:
+                    break
+                raw.extend(page)
+                before = page[-1].get("id")   # newest-first → last entry is oldest
+                if len(page) < 100:
+                    break
+            raw.reverse()   # oldest-first for the transcript
+            # "What's new" (session) and "from a person" are bounded to the current
+            # conversation session — the latest burst since a silence gap.
+            gap = int(cfg.get("session_gap") or 3600)
+            session_start = 0
+            if scope == "session":
+                session_start = self._session_start(raw, gap)   # channel's current session
+            elif scope == "user":
+                last_idx = -1                                    # the person's last message…
+                for i in range(len(raw)):
+                    if str(raw[i].get("user_id")) == str(user):
+                        last_idx = i
+                if last_idx >= 0:                                # …and the session it sits in
+                    session_start = self._session_start(raw, gap, last_idx)
+            def keep(m):
+                try:
+                    mid = int(m.get("id") or 0)
+                except Exception:
+                    mid = 0
+                if scope == "user":
+                    if str(m.get("user_id")) != str(user):
+                        return False
+                    return session_start == 0 or mid >= session_start
+                if scope == "session":
+                    return session_start == 0 or mid >= session_start
+                if cutoff:
+                    return mid > cutoff
+                return True
+            lines = []
+            for m in raw:
+                if not keep(m):
+                    continue
+                content = self._summ_line_text(m)
+                if not content:
+                    continue
+                name = m.get("nick") or m.get("global_name") or m.get("username") or "someone"
+                lines.append(f"[{hhmm(m.get('timestamp'))}] {name}: {content}")
+            if not lines:
+                self.broadcast({"type": "summaryError", "text": "Nothing to summarize in that range"})
+                return
+            summary = self._llm_summarize(cfg, "\n".join(lines[-CAP:]))
+            if not summary:
+                self.broadcast({"type": "summaryError", "text": "Summarize: empty response from provider"})
+                return
+            self.broadcast({"type": "summary", "text": summary})
+        except Exception as e:
+            print(f"dsqrd: summarize EXC {e!r}", flush=True)
+            self.broadcast({"type": "summaryError", "text": f"Summarize failed: {e}"})
 
     def do_profile(self, conn, user_id, ws):
         """Fetch a Discord user's profile card (P in the client). Maps to the
@@ -1932,6 +2127,8 @@ class DQS:
                     threading.Thread(target=self.send_recent, args=(conn, ch), daemon=True).start()
                 elif t == "history":
                     threading.Thread(target=self.send_history, args=(conn, ch, cmd.get("before")), daemon=True).start()
+                elif t == "summarize" and ch:
+                    threading.Thread(target=self.do_summarize, args=(ch, cmd.get("scope"), cmd.get("user")), daemon=True).start()
                 elif t == "send" and ch:
                     # allow attachment-only sends (empty text); do_send guards the
                     # genuinely-empty case (the UI never sends empty + no attachment).
