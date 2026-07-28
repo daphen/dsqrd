@@ -1076,6 +1076,36 @@ class DQS:
         out.reverse()
         self.write(conn, {"type": "history", "channel": channel_id, "msgs": out})
 
+    def _available_clis(self):
+        """Which keyless agent CLIs are installed on THIS machine — the setup guide
+        offers a one-click button per one found, and nothing if none (no assumption
+        that any particular CLI is present). Registry, so more slot in later."""
+        import shutil
+        path = "/etc/profiles/per-user/{}/bin:/run/current-system/sw/bin:{}/.local/bin:{}".format(
+            os.environ.get("USER", ""), os.path.expanduser("~"), os.environ.get("PATH", ""))
+        registry = [("claude-cli", "claude", "Claude"), ("codex-cli", "codex", "Codex")]
+        return [{"id": cid, "label": label} for cid, binname, label in registry if shutil.which(binname, path=path)]
+
+    def _write_summarize_cfg(self, block):
+        """Merge a summarize block into profiles.json (one-click setup), preserving
+        the Discord token and everything else; atomic replace."""
+        p = os.path.expanduser("~/.config/dsqrd/profiles.json")
+        try:
+            try:
+                with open(p) as f:
+                    d = json.load(f) or {}
+            except FileNotFoundError:
+                d = {}
+            d["summarize"] = block
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            tmp = p + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(d, f, indent=2)
+            os.replace(tmp, p)
+            self.broadcast({"type": "toast", "text": "Summaries enabled — press again to summarize"})
+        except Exception as e:
+            self.broadcast({"type": "toast", "text": f"Setup failed: {e}"})
+
     def _summarize_cfg(self):
         """Provider config from ~/.config/dsqrd/profiles.json's "summarize" block:
         {"base_url": "...", "model": "...", "api_key": "..."} (api_key optional for
@@ -1093,19 +1123,52 @@ class DQS:
         env = dict(os.environ)
         env["PATH"] = "/etc/profiles/per-user/{}/bin:/run/current-system/sw/bin:{}/.local/bin:{}".format(
             os.environ.get("USER", ""), os.path.expanduser("~"), env.get("PATH", ""))
-        cmd = ["claude", "-p"]
-        if cfg.get("model"):
-            cmd += ["--model", cfg["model"]]
+        cmd = ["claude", "-p", "--model", cfg.get("model") or "haiku"]   # small + fast for a recap
         r = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
                            env=env, cwd="/tmp", timeout=180)
         if r.returncode != 0:
             raise RuntimeError((r.stderr or "claude -p failed").strip()[:200])
         return (r.stdout or "").strip()
 
+    def _codex_cli(self, cfg, prompt):
+        # Keyless via the codex CLI (ChatGPT login). Final message → a temp file
+        # (-o) so codex's status output on stdout doesn't pollute the summary.
+        import tempfile
+        env = dict(os.environ)
+        env["PATH"] = "/etc/profiles/per-user/{}/bin:/run/current-system/sw/bin:{}/.local/bin:{}".format(
+            os.environ.get("USER", ""), os.path.expanduser("~"), env.get("PATH", ""))
+        fd, out = tempfile.mkstemp(prefix="dsqrd-codex-"); os.close(fd)
+        try:
+            cmd = ["codex", "exec", "--skip-git-repo-check", "-s", "read-only", "-o", out]
+            if cfg.get("model"):
+                cmd += ["-m", cfg["model"]]
+            cmd += ["-"]
+            r = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
+                               env=env, cwd="/tmp", timeout=180)
+            text = ""
+            try:
+                with open(out) as f:
+                    text = f.read().strip()
+            except Exception:
+                text = ""
+            if not text:
+                err = (r.stderr or "").strip()
+                m = re.search(r'"message":"([^"]+)"', err)
+                raise RuntimeError(m.group(1) if m else (err[-200:] or "codex exec failed"))
+            return text
+        finally:
+            try:
+                os.remove(out)
+            except Exception:
+                pass
+
     def _llm_summarize(self, cfg, transcript):
         sysp = cfg.get("prompt") or SUMMARIZE_SYS   # override in profiles.json, no restart
-        if (cfg.get("provider") or "").lower() == "claude-cli":
+        prov = (cfg.get("provider") or "").lower()
+        if prov == "claude-cli":
             return self._claude_cli(cfg, sysp + "\n\nChat transcript:\n" + transcript)
+        if prov == "codex-cli":
+            return self._codex_cli(cfg, sysp + "\n\nChat transcript:\n" + transcript)
         url = (cfg.get("base_url") or "").rstrip("/") + "/chat/completions"
         body = json.dumps({
             "model": cfg.get("model") or "gpt-4o-mini",
@@ -1173,8 +1236,7 @@ class DQS:
         endpoint. Result broadcasts as a "summary" event; failures toast."""
         cfg = self._summarize_cfg()
         if (cfg.get("provider") or "").lower() != "claude-cli" and not cfg.get("base_url"):
-            self.broadcast({"type": "summaryError", "text":
-                "Summarize: add a \"summarize\" block to ~/.config/dsqrd/profiles.json"})
+            self.broadcast({"type": "summarizeSetup", "clis": self._available_clis()})
             return
         try:
             # scope → a cutoff snowflake; keep messages with id greater than it.
@@ -2129,6 +2191,19 @@ class DQS:
                     threading.Thread(target=self.send_history, args=(conn, ch, cmd.get("before")), daemon=True).start()
                 elif t == "summarize" and ch:
                     threading.Thread(target=self.do_summarize, args=(ch, cmd.get("scope"), cmd.get("user")), daemon=True).start()
+                elif t == "summarizeEnable":
+                    prov = (cmd.get("provider") or "").lower()
+                    if prov == "openai":
+                        block = {"base_url": "https://api.openai.com/v1",
+                                 "model": "gpt-4o-mini", "api_key": cmd.get("api_key") or ""}
+                    elif prov == "anthropic":
+                        block = {"base_url": "https://api.anthropic.com/v1",
+                                 "model": "claude-haiku-4-5", "api_key": cmd.get("api_key") or ""}
+                    else:   # a keyless CLI id (claude-cli / codex-cli)
+                        block = {"provider": prov or "claude-cli"}
+                        if block["provider"] == "claude-cli":
+                            block["model"] = "haiku"
+                    threading.Thread(target=self._write_summarize_cfg, args=(block,), daemon=True).start()
                 elif t == "send" and ch:
                     # allow attachment-only sends (empty text); do_send guards the
                     # genuinely-empty case (the UI never sends empty + no attachment).
