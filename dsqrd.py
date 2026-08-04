@@ -2232,7 +2232,10 @@ class DQS:
                         rs = (self.gateway.get_read_state() or {}).get(ch) or {}
                         before = rs.get("last_message_id")
                     if before:
-                        threading.Thread(target=self._call, args=("markread", self.discord.ack, ch, before), daemon=True).start()
+                        # Ack quietly (like maybe_mark_active_read): a mark-read is
+                        # low-stakes and self-heals on next open, so a transient
+                        # rejection must not toast. ack() already retries 5xx.
+                        threading.Thread(target=self.discord.ack, args=(ch, str(before)), daemon=True).start()
                 elif t == "typing" and ch:
                     threading.Thread(target=self.discord.send_typing, args=(ch,), daemon=True).start()
                 elif t == "view" and (cmd.get("images") or cmd.get("url")):

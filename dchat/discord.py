@@ -905,12 +905,20 @@ class Discord():
             })
         url = f"/api/v9/channels/{channel_id}/messages/{message_id}/ack"
         logger.debug("Sending message ack")
-        data, status = self.request("POST", url, message_data, self.header)
-        if not status:
-            return None
-        if status == 200:
-            return True
-        log_api_error(data, status, "ack")
+        # Discord's edge occasionally 5xx's an ack transiently ("upstream ...
+        # reset reason: overflow"); retry a couple times before giving up so a
+        # blip doesn't surface as a failure.
+        for attempt in range(3):
+            data, status = self.request("POST", url, message_data, self.header)
+            if not status:
+                return None
+            if status == 200:
+                return True
+            if status in (502, 503, 504) and attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            log_api_error(data, status, "ack")
+            return False
         return False
 
 
