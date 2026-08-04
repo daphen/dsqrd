@@ -2223,8 +2223,16 @@ class DQS:
                         emoji = self.codemap[emoji]
                     fn = self.discord.remove_reaction if cmd.get("remove") else self.discord.send_reaction
                     threading.Thread(target=self._call, args=("react", fn, ch, cmd["ts"], emoji), daemon=True).start()
-                elif t == "markread" and ch and cmd.get("before"):
-                    threading.Thread(target=self._call, args=("markread", self.discord.ack, ch, cmd["before"]), daemon=True).start()
+                elif t == "markread" and ch:
+                    # Opening a channel sends before=<ts>; the sidebar mark-read
+                    # sends none — resolve the channel's latest message id from the
+                    # gateway read-state so we can ack without a client-provided ts.
+                    before = cmd.get("before")
+                    if not before:
+                        rs = (self.gateway.get_read_state() or {}).get(ch) or {}
+                        before = rs.get("last_message_id")
+                    if before:
+                        threading.Thread(target=self._call, args=("markread", self.discord.ack, ch, before), daemon=True).start()
                 elif t == "typing" and ch:
                     threading.Thread(target=self.discord.send_typing, args=(ch,), daemon=True).start()
                 elif t == "view" and (cmd.get("images") or cmd.get("url")):
