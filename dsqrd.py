@@ -437,7 +437,9 @@ def map_embeds(m, content):
                 if txt:
                     unfurls.append(f" {name}\n{txt}")
                     continue
-            unfurls.append(f"[ {name}]({url})")
+            imgs.append({"type": "file", "name": name,
+                         "ext": os.path.splitext(name)[1].lstrip("."),
+                         "link": url, "id": mid})
             continue
         if t in UNFURL_TYPES:
             if proxy and (hw[0] or hw[1]):
