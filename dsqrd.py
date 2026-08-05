@@ -437,7 +437,7 @@ def map_embeds(m, content):
                 if txt:
                     unfurls.append(f" {name}\n{txt}")
                     continue
-            unfurls.append(f" {name}\n{url}")
+            unfurls.append(f"[ {name}]({url})")
             continue
         if t in UNFURL_TYPES:
             if proxy and (hw[0] or hw[1]):
