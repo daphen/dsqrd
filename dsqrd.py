@@ -432,7 +432,7 @@ def map_embeds(m, content):
             # Discord converts >2000-char messages into a message.txt
             # attachment: the file IS the message, so inline it. Signed CDN
             # urls expire (~24h) — a failed fetch falls back to the chip.
-            if t.startswith("text/"):
+            if name == "message.txt" and t.startswith("text/"):
                 txt = _fetch_text(url)
                 if txt:
                     unfurls.append(f" {name}\n{txt}")
