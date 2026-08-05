@@ -1460,8 +1460,8 @@ class DQS:
                        None, None, None, True, atts)
 
     def do_download(self, images):
-        """S in the client: save the message's media to ~/Downloads. Opening
-        media streams or caches ephemerally; this is the keep-a-copy action."""
+        """Save media. Each image may carry `savepath` (an exact path the user
+        chose in the portal Save dialog); otherwise it lands in ~/Downloads."""
         dl = os.environ.get("XDG_DOWNLOAD_DIR") or os.path.expanduser("~/Downloads")
         os.makedirs(dl, exist_ok=True)
         saved, last = 0, ""
@@ -1470,12 +1470,15 @@ class DQS:
             if not url:
                 continue
             name = im.get("name") or f"{im.get('id', 'file')}.{im.get('ext') or 'bin'}"
+            sp = im.get("savepath")
+            target = os.path.expanduser(sp) if sp else os.path.join(dl, name)
+            os.makedirs(os.path.dirname(target) or dl, exist_ok=True)
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
-                with urllib.request.urlopen(req, timeout=600) as r, open(os.path.join(dl, name), "wb") as f:
+                with urllib.request.urlopen(req, timeout=600) as r, open(target, "wb") as f:
                     shutil.copyfileobj(r, f)
                 saved += 1
-                last = name
+                last = os.path.basename(target)
             except Exception as e:
                 print(f"dsqrd: download error {e!r}", flush=True)
         text = ("Couldn't download" if not saved
