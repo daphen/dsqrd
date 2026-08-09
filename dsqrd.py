@@ -2309,6 +2309,24 @@ class DQS:
                         # low-stakes and self-heals on next open, so a transient
                         # rejection must not toast. ack() already retries 5xx.
                         threading.Thread(target=self.discord.ack, args=(ch, str(before)), daemon=True).start()
+                elif t == "open" and ch:
+                    # Deep-link from outside the client (a CLI, a cross-app digest):
+                    # navigate the UI to a channel, reusing the exact broadcast a
+                    # clicked notification produces — so there's no second navigation
+                    # path to keep in sync. Unknown ids are rejected rather than
+                    # broadcast: the UI clears its state to switch workspace, so a
+                    # typo'd id would blank the view with nothing to load.
+                    #
+                    # Deliberately does NOT touch self.active_ch. That is the daemon's
+                    # belief about what the UI is *showing* and it suppresses
+                    # notifications; only "recent" can honestly set it, once the UI has
+                    # really switched. Setting it here would silence a channel nobody
+                    # has open yet.
+                    if ch in self.chan_guild:
+                        self.broadcast({"type": "open", "workspace": self.chan_guild.get(ch, ""),
+                                        "channel": ch, "thread": cmd.get("thread") or ""})
+                    else:
+                        self.write(conn, {"type": "toast", "text": f"Unknown channel {ch}"})
                 elif t == "typing" and ch:
                     threading.Thread(target=self.discord.send_typing, args=(ch,), daemon=True).start()
                 elif t == "view" and (cmd.get("images") or cmd.get("url")):
