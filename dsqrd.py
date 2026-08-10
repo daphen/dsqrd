@@ -260,13 +260,21 @@ def _derive_gif(url):
     return None
 
 
-def _qt_img(url):
+def _qt_img(url, force=False):
     """Inline display URL safe for this Qt build, which has no webp decoder.
     Discord's media proxy transcodes on demand — ask it for png when the
     inline path would be webp. Only for display paths; `full` keeps the
-    original (imv/mpv decode webp fine)."""
-    if url and ".webp" in _clean(url).lower() and re.search(r"(?:images-ext-\d+|media)\.discordapp\.net/", url):
-        return url + ("&" if "?" in url else "?") + "format=png"
+    original (imv/mpv decode webp fine).
+
+    force skips the URL sniffing, for a source known to be webp from its
+    mimetype while named something else — the caller must already point at a
+    transcoding host."""
+    if not url:
+        return url
+    if force or (".webp" in _clean(url).lower() and re.search(r"(?:images-ext-\d+|media)\.discordapp\.net/", url)):
+        # signed CDN URLs end in a bare "&"; don't leave an empty param behind it
+        base = url.rstrip("&?")
+        return base + ("&" if "?" in base else "?") + "format=png"
     return url
 
 
@@ -343,9 +351,13 @@ def map_embeds(m, content):
             gif = t == "image/gif" or _clean(src).endswith((".gif", ".apng"))
             disp = src
             if t == "image/webp" or _clean(src).lower().endswith(".webp"):
-                # signed attachment CDN doesn't transcode; its media.* twin does
-                disp = src.replace("cdn.discordapp.com", "media.discordapp.net")
-                disp = _qt_img(disp)
+                # signed attachment CDN doesn't transcode; its media.* twin does —
+                # but only when asked. Discord's Android client re-encodes uploads to
+                # webp while keeping the .png name, so the URL can't be trusted to
+                # reveal the format: force the transcode off the mimetype instead.
+                # Without it media.* serves the webp original and the image renders
+                # blank (while the untouched cdn URL would have served png).
+                disp = _qt_img(src.replace("cdn.discordapp.com", "media.discordapp.net"), force=True)
             imgs.append({"path": disp, "full": src, "w": hw[1] or 0, "h": hw[0] or 0,
                          "id": mid, "ext": "", "type": "gif" if gif else "img", "pending": False})
             continue
