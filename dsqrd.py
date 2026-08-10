@@ -352,9 +352,10 @@ def map_embeds(m, content):
             disp = src
             if t == "image/webp" or _clean(src).lower().endswith(".webp"):
                 # signed attachment CDN doesn't transcode; its media.* twin does —
-                # but only when asked. Discord's Android client re-encodes uploads to
-                # webp while keeping the .png name, so the URL can't be trusted to
-                # reveal the format: force the transcode off the mimetype instead.
+                # but only when asked. The filename can't be trusted to reveal the
+                # format: Discord names every clipboard paste "image.png" whatever
+                # the bytes are, so a webp screenshot arrives as image.png with
+                # content_type image/webp. Force the transcode off the mimetype.
                 # Without it media.* serves the webp original and the image renders
                 # blank (while the untouched cdn URL would have served png).
                 disp = _qt_img(src.replace("cdn.discordapp.com", "media.discordapp.net"), force=True)
