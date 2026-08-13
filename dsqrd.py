@@ -172,6 +172,15 @@ SUMMARIZE_SYS = (
     "settles one thing into ONE bullet naming the outcome, and drop messages that add "
     "nothing. Ten messages about one decision is one bullet.\n"
     "\n"
+    "Be SPECIFIC or say nothing. Carry over the concrete things the messages contain — "
+    "who, the day or date, the time, the number, the place, the name of the thing — and "
+    "resolve relative talk against the timestamps (\"next month\" becomes the month's "
+    "name; \"tomorrow\" becomes the day). Never swap a person for a role: if Davve got "
+    "lost, say Davve, not \"a visitor\". Never restate a topic as though it were "
+    "information — \"they discussed the trip\" and \"working on yoga\" tell the reader "
+    "nothing. If the transcript gives you nothing concrete on a topic, leave that "
+    "bullet out entirely; a short specific recap beats a complete vague one.\n"
+    "\n"
     "Inline `**bold**`, `` `code` `` and `[text](url)` all render — keep a link someone "
     "shared if it's worth going back to. Nested bullets, tables, code fences and "
     "headers deeper than `##` do NOT render; never use them. Around a dozen bullets "
@@ -572,6 +581,27 @@ def hhmm(iso):
         return datetime.fromisoformat(iso).astimezone().strftime("%H:%M")
     except Exception:
         return iso[11:16] if len(iso) >= 16 else ""
+
+
+def local_day(iso):
+    """Local calendar day of a Discord timestamp, for spotting a multi-day span."""
+    try:
+        return datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d")
+    except Exception:
+        return (iso or "")[:10]
+
+
+def stamp(iso, with_date):
+    """Transcript timestamp. A summary of several days needs the DAY, not just the
+    clock — without it the model cannot say "left on Tuesday" and falls back to
+    mush like "next month"."""
+    if not iso:
+        return ""
+    try:
+        d = datetime.fromisoformat(iso).astimezone()
+        return d.strftime("%a %-d %b %H:%M") if with_date else d.strftime("%H:%M")
+    except Exception:
+        return iso[:16] if with_date else (iso[11:16] if len(iso) >= 16 else "")
 
 
 def daykey(iso):
@@ -1255,8 +1285,10 @@ class DQS:
 
     def _llm_summarize(self, cfg, transcript, scope=None):
         sysp = cfg.get("prompt") or SUMMARIZE_SYS   # override in profiles.json, no restart
-        # appended after the override so a custom prompt still learns the span
-        sysp += "\n\nThis transcript is " + span_label(scope) + "."
+        # appended after the override so a custom prompt still learns the span, and
+        # today's date so "next month" in a message resolves to a real month
+        sysp += ("\n\nThis transcript is " + span_label(scope)
+                 + ". Today is " + datetime.now().astimezone().strftime("%A %-d %B %Y") + ".")
         prov = (cfg.get("provider") or "").lower()
         if prov == "pi-cli":
             return self._pi_cli(cfg, sysp, transcript)
@@ -1409,15 +1441,15 @@ class DQS:
                 return mid > cutoff
             return True
 
+        kept = [m for m in raw if keep(m) and self._summ_line_text(m)]
+        # Stamp the DAY too once the span crosses midnight — a week of [HH:MM] with no
+        # date is why recaps say "next month" instead of naming the day something was
+        # agreed. Same-day spans stay on the bare clock.
+        with_date = len({local_day(m.get("timestamp")) for m in kept}) > 1
         lines = []
-        for m in raw:
-            if not keep(m):
-                continue
-            content = self._summ_line_text(m)
-            if not content:
-                continue
+        for m in kept:
             name = m.get("nick") or m.get("global_name") or m.get("username") or "someone"
-            lines.append(f"[{hhmm(m.get('timestamp'))}] {name}: {content}")
+            lines.append(f"[{stamp(m.get('timestamp'), with_date)}] {name}: {self._summ_line_text(m)}")
         return lines[-CAP:]
 
     def do_summarize(self, channel, scope, user):
@@ -1456,7 +1488,8 @@ class DQS:
             if not lines:
                 self.broadcast({"type": "summaryError", "text": "No conversation in that range"})
                 return
-            answer = self._llm_call(cfg, ANSWER_SYS + "\n\nThis transcript is " + span_label(scope) + ".",
+            answer = self._llm_call(cfg, ANSWER_SYS + "\n\nThis transcript is " + span_label(scope)
+                                    + ". Today is " + datetime.now().astimezone().strftime("%A %-d %B %Y") + ".",
                                     "Question: " + question + "\n\nConversation transcript:\n" + "\n".join(lines))
             if not answer:
                 self.broadcast({"type": "summaryError", "text": "Ask: empty response from provider"})
