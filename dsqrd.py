@@ -147,25 +147,71 @@ def banner_url(user_id, banner_hash):
 DISCORD_EPOCH = 1420070400000
 
 SUMMARIZE_SYS = (
-    "You summarize a chat channel for someone who was away. Output GitHub-flavored "
-    "markdown in this exact shape:\n"
-    "1. One line starting with `**TL;DR:**` — a single sentence covering the whole span.\n"
-    "2. Then group the conversation into 2-5 thematic sections, each introduced by a "
-    "`## ` header of one or two words (e.g. Gaming, Work, Personal).\n"
-    "3. Under each header, a few concise bullets (`- `). Start every bullet with a "
+    "You catch someone up on a chat channel they were away from.\n"
+    "\n"
+    "The transcript is one message per line, oldest first, as `[HH:MM] name: text`. "
+    "Names are the speakers' own display names — reuse them verbatim, never invent or "
+    "translate them.\n"
+    "\n"
+    "What matters most, in order: anything that needs the reader (a question put to "
+    "them, something asked of them, a deadline), then decisions reached, then what was "
+    "merely discussed. Lead with the first kind wherever it exists — a recap that "
+    "buries \"you were asked X\" under small talk has failed.\n"
+    "\n"
+    "Output GitHub-flavored markdown in this exact shape — the app parses it, so do "
+    "not deviate:\n"
+    "1. One line starting with `**TL;DR:**` — a single sentence covering the whole "
+    "span, naming what needs the reader if anything does.\n"
+    "2. Then one `## ` header per theme, one or two words (e.g. Gaming, Work, "
+    "Release). Use as many as the conversation actually has: three lines about one "
+    "topic is ONE section, not two — never invent a theme to fill a quota.\n"
+    "3. Under each header, flat `- ` bullets, one line each. Start every bullet with a "
     "**bold lead** (the topic or person in **bold**), then ` — ` and the detail.\n"
-    "Write the summary in the SAME LANGUAGE the conversation is mostly in (match the "
-    "messages, not this instruction). Be concise; name who said what where it matters. "
-    "No preamble and no closing remarks."
+    "\n"
+    "Bullets are points, not a replay of the transcript: fold a back-and-forth that "
+    "settles one thing into ONE bullet naming the outcome, and drop messages that add "
+    "nothing. Ten messages about one decision is one bullet.\n"
+    "\n"
+    "Inline `**bold**`, `` `code` `` and `[text](url)` all render — keep a link someone "
+    "shared if it's worth going back to. Nested bullets, tables, code fences and "
+    "headers deeper than `##` do NOT render; never use them. Around a dozen bullets "
+    "total is plenty; a long transcript gets tighter bullets, not more of them.\n"
+    "\n"
+    "Skip joins, leaves, bare reactions and bot chatter unless something turns on "
+    "them. Say only what the transcript supports — no guessing at what someone meant, "
+    "and if the span is thin, a TL;DR and one short section is the right answer.\n"
+    "\n"
+    "Write in the SAME LANGUAGE the conversation is mostly in (match the messages, not "
+    "this instruction). No preamble and no closing remarks."
 )
 
 ANSWER_SYS = (
     "You answer a question about a chat conversation, using only what the transcript "
-    "below shows. Be concise and direct — a short paragraph or a few bullets in "
-    "GitHub-flavored markdown. Name who said what where it matters. Answer in the SAME "
-    "LANGUAGE the conversation is mostly in (match the messages, not this instruction). "
-    "If the transcript doesn't contain the answer, say so plainly. No preamble."
+    "shows. It is one message per line, oldest first, as `[HH:MM] name: text`; reuse "
+    "the names verbatim.\n"
+    "Be concise and direct — a short paragraph or a few flat `- ` bullets in "
+    "GitHub-flavored markdown (no nested bullets, tables or code fences). Quote or "
+    "attribute where it settles the question, and give the time when the answer turns "
+    "on when something was said.\n"
+    "If the transcript doesn't contain the answer, say so plainly and say what it does "
+    "show instead — never fill the gap with a guess. Answer in the SAME LANGUAGE the "
+    "conversation is mostly in (match the messages, not this instruction). No preamble."
 )
+
+
+# The stretch of conversation a summary/answer covers, in words the model can use.
+# do_summarize/do_ask know the scope; without it the recap can't say what it covered.
+SPAN_LABELS = {
+    "session": "the current burst of conversation, since the last long silence",
+    "all_new": "everything posted since the reader last read this channel",
+    "last_day": "the last 24 hours",
+    "last_week": "the last week",
+    "user": "one person's messages from the current conversation",
+}
+
+
+def span_label(scope):
+    return SPAN_LABELS.get(scope or "", "the channel's recent messages")
 
 
 def snowflake_date(user_id):
@@ -1207,8 +1253,10 @@ class DQS:
             except Exception:
                 pass
 
-    def _llm_summarize(self, cfg, transcript):
+    def _llm_summarize(self, cfg, transcript, scope=None):
         sysp = cfg.get("prompt") or SUMMARIZE_SYS   # override in profiles.json, no restart
+        # appended after the override so a custom prompt still learns the span
+        sysp += "\n\nThis transcript is " + span_label(scope) + "."
         prov = (cfg.get("provider") or "").lower()
         if prov == "pi-cli":
             return self._pi_cli(cfg, sysp, transcript)
@@ -1376,7 +1424,7 @@ class DQS:
         """Summarize the channel's in-scope messages via the user-configured
         provider. Result broadcasts as a "summary" event; failures toast."""
         cfg = self._summarize_cfg()
-        if (cfg.get("provider") or "").lower() != "claude-cli" and not cfg.get("base_url"):
+        if not (cfg.get("provider") or cfg.get("base_url")):
             self.broadcast({"type": "summarizeSetup", "clis": self._available_clis()})
             return
         try:
@@ -1384,7 +1432,7 @@ class DQS:
             if not lines:
                 self.broadcast({"type": "summaryError", "text": "Nothing to summarize in that range"})
                 return
-            summary = self._llm_summarize(cfg, "\n".join(lines))
+            summary = self._llm_summarize(cfg, "\n".join(lines), scope)
             if not summary:
                 self.broadcast({"type": "summaryError", "text": "Summarize: empty response from provider"})
                 return
@@ -1400,7 +1448,7 @@ class DQS:
         if not question:
             return
         cfg = self._summarize_cfg()
-        if (cfg.get("provider") or "").lower() != "claude-cli" and not cfg.get("base_url"):
+        if not (cfg.get("provider") or cfg.get("base_url")):
             self.broadcast({"type": "summarizeSetup", "clis": self._available_clis()})
             return
         try:
@@ -1408,7 +1456,7 @@ class DQS:
             if not lines:
                 self.broadcast({"type": "summaryError", "text": "No conversation in that range"})
                 return
-            answer = self._llm_call(cfg, ANSWER_SYS,
+            answer = self._llm_call(cfg, ANSWER_SYS + "\n\nThis transcript is " + span_label(scope) + ".",
                                     "Question: " + question + "\n\nConversation transcript:\n" + "\n".join(lines))
             if not answer:
                 self.broadcast({"type": "summaryError", "text": "Ask: empty response from provider"})
