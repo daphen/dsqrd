@@ -1139,6 +1139,28 @@ class DQS:
         except Exception:
             return {}
 
+    def _pi_cli(self, cfg, sysp, prompt):
+        # pi in print mode. Unlike the claude/codex paths this is NOT keyless: pi
+        # resolves the provider from a key. Take it from the summarize block when
+        # set and hand it over through the ENVIRONMENT — never argv, which any
+        # local process can read out of /proc/<pid>/cmdline.
+        # --no-tools because pi is a coding agent (read/bash/edit/write) and a
+        # summarizer must not touch the filesystem; --no-session so recaps don't
+        # accumulate session files.
+        env = dict(os.environ)
+        env["PATH"] = "/etc/profiles/per-user/{}/bin:/run/current-system/sw/bin:{}/.local/bin:{}".format(
+            os.environ.get("USER", ""), os.path.expanduser("~"), env.get("PATH", ""))
+        if cfg.get("api_key"):
+            env["OPENAI_API_KEY"] = cfg["api_key"]
+        cmd = ["pi", "-p", "--model", cfg.get("model") or "openai/gpt-5.5",
+               "--no-tools", "--no-session", "--system-prompt", sysp]
+        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
+                           env=env, cwd="/tmp", timeout=180)
+        out = (r.stdout or "").strip()
+        if r.returncode != 0 or not out:
+            raise RuntimeError(((r.stderr or "") + " " + out).strip()[:200] or "pi -p failed")
+        return out
+
     def _claude_cli(self, cfg, prompt):
         # Keyless path: shells out to the `claude` CLI in print mode, which uses
         # the user's Claude Code login (Max plan) — no API key, no per-token bill.
@@ -1188,6 +1210,8 @@ class DQS:
     def _llm_summarize(self, cfg, transcript):
         sysp = cfg.get("prompt") or SUMMARIZE_SYS   # override in profiles.json, no restart
         prov = (cfg.get("provider") or "").lower()
+        if prov == "pi-cli":
+            return self._pi_cli(cfg, sysp, transcript)
         if prov == "claude-cli":
             return self._claude_cli(cfg, sysp + "\n\nChat transcript:\n" + transcript)
         if prov == "codex-cli":
@@ -1213,6 +1237,8 @@ class DQS:
         """One-shot chat with a system prompt + user content, same providers as
         _llm_summarize. Used by the ask (Q&A) path."""
         prov = (cfg.get("provider") or "").lower()
+        if prov == "pi-cli":
+            return self._pi_cli(cfg, sysp, user_content)
         if prov == "claude-cli":
             return self._claude_cli(cfg, sysp + "\n\n" + user_content)
         if prov == "codex-cli":
