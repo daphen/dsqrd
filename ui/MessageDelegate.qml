@@ -224,9 +224,12 @@ Item {
                    font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 12 }
         }
 
-        Text { renderTypeQuality: Text.VeryHighRenderTypeQuality;
+        Text {
+            id: bodyText
+            renderTypeQuality: Text.VeryHighRenderTypeQuality
             visible: del.text.length > 0 && !del.emojiOnly
             width: parent.width
+            z: hoveredLink.indexOf("emoji:") === 0 ? 20 : 0
             // grouped rows have no visible header, so the marker rides the body there
             text: Backend.richify(del.text, 22)
                   + (del.edited && del.grouped ? " <span style='font-size:11px;color:" + Theme.fg_muted + "'>(edited)</span>" : "")
@@ -237,7 +240,20 @@ Item {
             textFormat: Text.RichText
             wrapMode: Text.Wrap
             font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 15
-            onLinkActivated: (link) => Backend.openUrl(link)
+            onLinkActivated: link => { if (link.indexOf("emoji:") !== 0) Backend.openUrl(link) }
+            Rectangle {
+                visible: bodyText.hoveredLink.indexOf("emoji:") === 0
+                x: 0; y: bodyText.height + 2
+                width: bodyEmojiTip.implicitWidth + 16; height: 25; radius: 8
+                color: Theme.overlay; border.color: Theme.hairline; border.width: 1
+                Text {
+                    id: bodyEmojiTip
+                    anchors.centerIn: parent
+                    text: ":" + bodyText.hoveredLink.slice(6) + ":"
+                    color: Theme.fg
+                    font.family: Theme.fontFamily; font.pixelSize: 12; font.weight: 500
+                }
+            }
         }
 
         // Emoji-only messages render large, and as real Image elements so custom
@@ -253,6 +269,7 @@ Item {
                     required property var modelData
                     width: part.modelData.img ? 40 : glyphT.implicitWidth
                     height: 40
+                    z: emojiHover.hovered ? 20 : 0
                     AnimatedImage {
                         visible: !!part.modelData.img
                         source: part.modelData.img || ""
@@ -269,6 +286,20 @@ Item {
                         renderTypeQuality: Text.VeryHighRenderTypeQuality
                         color: Theme.mode === "light" ? Theme.ink : Theme.fg
                         font.family: "Noto Color Emoji"; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 36
+                    }
+                    HoverHandler { id: emojiHover; enabled: !!part.modelData.name }
+                    Rectangle {
+                        visible: emojiHover.hovered
+                        x: 0; y: part.height + 2
+                        width: emojiTip.implicitWidth + 16; height: 25; radius: 8
+                        color: Theme.overlay; border.color: Theme.hairline; border.width: 1
+                        Text {
+                            id: emojiTip
+                            anchors.centerIn: parent
+                            text: ":" + (part.modelData.name || "") + ":"
+                            color: Theme.fg
+                            font.family: Theme.fontFamily; font.pixelSize: 12; font.weight: 500
+                        }
                     }
                 }
             }
@@ -303,6 +334,7 @@ Item {
                     readonly property bool playing: isAudio && Backend.playingId === String(img.id || "")
                     // music unfurls (Spotify …): compact card, art + title + artist
                     readonly property bool isMusic: img.type === "music"
+                    readonly property bool isViewable: !isFile && !isAudio && !isMusic && !!img.full
                     readonly property real ar: isVideo ? 0.5625 : ((img.w > 0 && img.h > 0) ? img.h / img.w : 0.66)
                     width: isFile ? Math.ceil(fileRow.implicitWidth) + 24
                          : isAudio ? Math.ceil(audioRow.implicitWidth) + 26
@@ -352,6 +384,8 @@ Item {
                         enabled: pillRect.isFile
                         onTapped: Backend.downloadFile(pillRect.img)
                     }
+                    HoverHandler { enabled: pillRect.isViewable; cursorShape: Qt.PointingHandCursor }
+                    TapHandler { enabled: pillRect.isViewable; onTapped: Backend.viewImage(del) }
                     Row {
                         id: audioRow
                         visible: pillRect.isAudio
@@ -543,8 +577,12 @@ Item {
             Repeater {
                 model: del.reactions
                 delegate: Rectangle {
+                    id: reactionPill
                     required property var modelData
+                    readonly property var reactorNames: (modelData.users && modelData.users.length)
+                        ? modelData.users : Backend.reactorsFor(del.ts, modelData.name)
                     height: 22; width: pill.implicitWidth + 16; radius: 11
+                    z: reactionHover.hovered ? 20 : 0
                     // highlight reactions you've added (mine) with the accent
                     color: modelData.mine ? Qt.rgba(Theme.sky.r, Theme.sky.g, Theme.sky.b, 0.18)
                                            : Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.06)
@@ -567,6 +605,29 @@ Item {
                         Text { renderTypeQuality: Text.VeryHighRenderTypeQuality; text: modelData.n; color: Theme.fg_muted
                                anchors.verticalCenter: parent.verticalCenter
                                font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 12; font.weight: 500 }
+                    }
+                    HoverHandler {
+                        id: reactionHover
+                        cursorShape: Qt.PointingHandCursor
+                        onHoveredChanged: if (hovered) Backend.fetchReactors(del)
+                    }
+                    TapHandler { onTapped: Backend.toggleReaction(del, reactionPill.modelData.name) }
+                    Rectangle {
+                        visible: reactionHover.hovered
+                        x: 0; y: -height - 3
+                        width: Math.min(340, Math.max(100, reactionTip.implicitWidth + 16))
+                        height: reactionTip.implicitHeight + 10; radius: 8
+                        color: Theme.overlay; border.color: Theme.hairline; border.width: 1
+                        Text {
+                            id: reactionTip
+                            x: 8; y: 5; width: parent.width - 16
+                            wrapMode: Text.Wrap
+                            text: ":" + Backend.emojiLabel(reactionPill.modelData.name) + ":  ·  "
+                                  + reactionPill.modelData.n
+                                  + (reactionPill.reactorNames.length ? "\n" + reactionPill.reactorNames.join(", ") : "")
+                            color: Theme.fg
+                            font.family: Theme.fontFamily; font.pixelSize: 12; font.weight: 500
+                        }
                     }
                 }
             }

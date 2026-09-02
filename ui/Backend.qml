@@ -146,6 +146,12 @@ Item {
     // file:// path for a custom emoji by name (empty for standard/unknown) —
     // used to render reaction-row icons in the react picker.
     function emojiPath(name) { return (_emoji && _emoji[name]) || "" }
+    function emojiLabel(name) {
+        if (!name) return "emoji"
+        if (name[0] === ":" && name[name.length - 1] === ":") return name.slice(1, -1)
+        for (const key in _codemap) if (_codemap[key] === name) return key.slice(1, -1)
+        return name
+    }
 
     // Who-reacted, fetched on demand (Discord sends no reactor list at all; Slack
     // truncates it). ts -> { emojiName: [displayNames] }.
@@ -376,10 +382,10 @@ Item {
         // Discord custom emoji <:name:id> / <a:name:id> (escaped to &lt;…&gt;
         // above) → inline CDN image. The id alone yields the URL.
         s = s.replace(/&lt;(a?):(\w+):(\d+)&gt;/g, (m, anim, name, id) =>
-            '<img src="https://cdn.discordapp.com/emojis/' + id + (anim ? '.gif' : '.png') + '?size=128" width="' + ep + '" height="' + ep + '">')
+            '<a href="emoji:' + name + '"><img src="https://cdn.discordapp.com/emojis/' + id + (anim ? '.gif' : '.png') + '?size=128" width="' + ep + '" height="' + ep + '"></a>')
         s = s.replace(/:([a-z0-9_+'\-]+):/g, (m, name) => {
             const p = _emoji[name]
-            return p ? '<img src="' + p + '" width="' + ep + '" height="' + ep + '">' : m
+            return p ? '<a href="emoji:' + name + '"><img src="' + p + '" width="' + ep + '" height="' + ep + '"></a>' : m
         })
         // Blockquotes: a leading "> " (escaped to "&gt; ") → muted text with a bar.
         s = s.replace(/(^|\n)&gt;[ \t]?([^\n]*)/g, '$1<font color="' + cssHex(Theme.fg_muted) + '">▎&#160;$2</font>')
@@ -411,8 +417,8 @@ Item {
         function glyph(t) { t = (t || "").trim(); if (t) out.push({ glyph: t }) }
         while ((m = re.exec(s)) !== null) {
             glyph(s.slice(last, m.index))
-            if (m[3]) out.push({ img: "https://cdn.discordapp.com/emojis/" + m[3] + (m[1] === "a" ? ".gif" : ".png") + "?size=128" })
-            else { const p = _emoji[m[4]]; p ? out.push({ img: p }) : out.push({ glyph: m[0] }) }
+            if (m[3]) out.push({ img: "https://cdn.discordapp.com/emojis/" + m[3] + (m[1] === "a" ? ".gif" : ".png") + "?size=128", name: m[2] })
+            else { const p = _emoji[m[4]]; p ? out.push({ img: p, name: m[4] }) : out.push({ glyph: m[0] }) }
             last = re.lastIndex
         }
         glyph(s.slice(last))
