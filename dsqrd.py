@@ -14,6 +14,7 @@ import array
 import atexit
 import base64
 import faulthandler
+import glob
 import hashlib
 import html as _html
 import json
@@ -2340,8 +2341,17 @@ class DQS:
         only then). Polls niri's focused window title."""
         while True:
             try:
+                env = os.environ.copy()
+                niri_socket = env.get("NIRI_SOCKET")
+                if not niri_socket or not os.path.exists(niri_socket):
+                    sockets = glob.glob(os.path.join(
+                        env.get("XDG_RUNTIME_DIR", "/tmp"),
+                        f"niri.{glob.escape(env['WAYLAND_DISPLAY'])}.*.sock"))
+                    niri_socket = max(sockets, key=os.path.getmtime)
+                    env["NIRI_SOCKET"] = niri_socket
                 out = subprocess.run(["niri", "msg", "--json", "focused-window"],
-                                     capture_output=True, text=True, timeout=3).stdout
+                                     capture_output=True, text=True, timeout=3,
+                                     env=env).stdout
                 w = json.loads(out) if out.strip() else None
                 active = bool(w) and (w.get("title") == "dsqrd")
             except Exception:
