@@ -55,7 +55,7 @@ Item {
         Rectangle {
             anchors.centerIn: parent; height: 20; radius: 10
             width: dayLbl.implicitWidth + 22
-            color: Theme.bg; border.color: Theme.hairline; border.width: 1
+            color: Theme.surface0; border.color: Theme.hairline; border.width: 1
             Text { id: dayLbl; anchors.centerIn: parent; renderTypeQuality: Text.VeryHighRenderTypeQuality
                    text: Backend.dayLabel(del.day); color: Theme.fg_muted
                    font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 12; font.weight: 500 }
@@ -69,9 +69,7 @@ Item {
         // No color/opacity animation here: the cursor must snap instantly so fast
         // j/k navigation doesn't catch rows mid-fade (reads as blinking).
         color: del.cursor ? Qt.rgba(Theme.selection.r, Theme.selection.g, Theme.selection.b, 0.6)
-             : hov.hovered ? Qt.rgba(Theme.selection.r, Theme.selection.g, Theme.selection.b, 0.5) : "transparent"
-        // mail-index cursor grammar: strong fg-alpha hairpin so the cursor
-        // reads even where the selection tint sinks into the card
+             : hov.hovered ? Qt.rgba(Theme.selection.r, Theme.selection.g, Theme.selection.b, 0.4) : "transparent"
         border.width: del.cursor ? 1 : 0
         border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.35)
     }
@@ -124,7 +122,7 @@ Item {
             Timer { id: copyRevert; interval: 1500; onTriggered: cursorMark.showCopy = false }
             Rectangle {   // the bar (resting state)
                 anchors.centerIn: parent
-                width: 3; height: 16; radius: 2; color: Theme.cursor
+                width: 3; height: 16; radius: 2; color: Theme.fg
                 opacity: cursorMark.showCopy ? 0 : 1
                 scale: cursorMark.showCopy ? 0.25 : 1
                 Behavior on opacity { NumberAnimation { duration: 250; easing.type: Easing.InOutQuad } }
@@ -133,7 +131,7 @@ Item {
             Text {   // the copy icon (nf-fa-copy)
                 renderTypeQuality: Text.VeryHighRenderTypeQuality
                 anchors.centerIn: parent
-                text: ""; color: Theme.cursor
+                text: ""; color: Theme.fg
                 font.family: Theme.fontFamily; font.pixelSize: 16
                 opacity: cursorMark.showCopy ? 1 : 0
                 scale: cursorMark.showCopy ? 1 : 0.25

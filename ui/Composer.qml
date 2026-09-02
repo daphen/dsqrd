@@ -11,16 +11,16 @@ Rectangle {
     // is the minimum (no artificial floor). Matches the thread reply input.
     implicitHeight: Math.min(180, input.implicitHeight + 26 + (((attaching && !Backend.threadOpen) || replying) ? 26 : 0))
     radius: Theme.radiusInner
-    // Insert mode = the desktop focus language (the docs' nav-focus): solid
-    // ink-tint fill + a strong neutral ring. Full inversion read too heavy.
     readonly property bool focused: input.focus
     readonly property color inkFg: Theme.fg
     readonly property color inkMuted: Theme.fg_muted
-    color: focused ? Theme.tintFill : Theme.surface
-    border.color: focused ? (Theme.mode === "light" ? Theme.fg : "#FFFFFF") : Theme.hairline
-    border.width: focused ? 1.5 : 1
-    Behavior on color { ColorAnimation { duration: 120 } }
-    Behavior on border.color { ColorAnimation { duration: 120 } }
+    readonly property color activeRing: Theme.mode === "light"
+        ? Theme.ink
+        : Qt.hsla(0.583, 0.29, 0.90, 1)
+    color: Theme.bg
+    border.color: focused ? activeRing : Theme.hairline
+    border.width: 2
+    Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
 
     signal exitInsert()
     signal openPalette()   // Ctrl+K from insert mode → jump palette (drops to normal)
@@ -230,7 +230,7 @@ Rectangle {
             anchors.centerIn: parent
             visible: Backend.summaryLoading
             running: Backend.summaryLoading
-            color: root.inkFg
+            color: Theme.electric
         }
         HoverHandler { id: hovSum }
         TapHandler { enabled: !Backend.summaryLoading; onTapped: root.openSummarize() }

@@ -7,8 +7,9 @@ import QsLib
 Rectangle {
     id: sidebar
     // sits directly on the window canvas — no own surface, no divider
-    color: "transparent"
+    color: Theme.bgDim
     property bool active: true   // is this the focused panel?
+    readonly property color primaryFill: Theme.surface
     // freeze channel-list reordering while the user navigates here
     onActiveChanged: Backend.sidebarNavigating = active
     Component.onCompleted: Backend.sidebarNavigating = active
@@ -121,9 +122,8 @@ Rectangle {
                         width: Math.min(tabLbl.implicitWidth + 20, 110)
                         // Snap, don't animate: a color fade on the active tab reads as a
                         // "blink" when switching workspaces (same reason the msg cursor snaps).
-                        color: active ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.10) : tabHov.hovered ? Theme.hover : "transparent"
-                        border.width: 1
-                        border.color: active ? Theme.hairline : "transparent"
+                        color: active ? Theme.surface1 : tabHov.hovered ? Theme.surface : "transparent"
+                        border.width: 0
                         Text { id: tabLbl; 
                             anchors.centerIn: parent; width: parent.width - 12; elide: Text.ElideRight
                             horizontalAlignment: Text.AlignHCenter
@@ -178,15 +178,16 @@ Rectangle {
             visible: Backend.hasThreads
             width: parent.width; height: Backend.hasThreads ? 36 : 0; clip: true; radius: height / 2
             readonly property bool thPrimary: sidebar.threadsSelected && sidebar.active
-            // Reference style: the focused row is an inverted ink pill.
-            color: thPrimary ? Theme.fg : thHov.hovered ? Theme.hover : "transparent"
+            color: thPrimary ? sidebar.primaryFill : thHov.hovered ? Theme.surface : "transparent"
+            border.width: thPrimary ? 1 : 0
+            border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
             Row {
                 anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 8; spacing: 7
                 Text { anchors.verticalCenter: parent.verticalCenter
-                       text: "↳"; color: parent.parent.thPrimary ? Theme.bg : Theme.fg_muted
+                       text: "↳"; color: parent.parent.thPrimary ? Theme.fg : Theme.fg_muted
                        font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 15 }
                 Text { anchors.verticalCenter: parent.verticalCenter
-                       text: "Threads"; color: parent.parent.thPrimary ? Theme.bg : Theme.fg
+                       text: "Threads"; color: Theme.fg
                        font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
                        font.pixelSize: 14; font.weight: Backend.threadUnreadTotal > 0 ? 500 : Theme.fontWeight }
             }
@@ -208,14 +209,16 @@ Rectangle {
             visible: Backend.hasThreads
             width: parent.width; height: Backend.hasThreads ? 36 : 0; clip: true; radius: height / 2
             readonly property bool mePrimary: sidebar.mentionsSelected && sidebar.active
-            color: mePrimary ? Theme.fg : meHov.hovered ? Theme.hover : "transparent"
+            color: mePrimary ? sidebar.primaryFill : meHov.hovered ? Theme.surface : "transparent"
+            border.width: mePrimary ? 1 : 0
+            border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
             Row {
                 anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 8; spacing: 7
                 Text { anchors.verticalCenter: parent.verticalCenter
-                       text: "@"; color: parent.parent.mePrimary ? Theme.bg : Theme.fg_muted
+                       text: "@"; color: parent.parent.mePrimary ? Theme.fg : Theme.fg_muted
                        font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 15 }
                 Text { anchors.verticalCenter: parent.verticalCenter
-                       text: "Mentions"; color: parent.parent.mePrimary ? Theme.bg : Theme.fg
+                       text: "Mentions"; color: Theme.fg
                        font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
                        font.pixelSize: 14; font.weight: Theme.fontWeight }
             }
@@ -327,9 +330,11 @@ Rectangle {
                     anchors.leftMargin: 6
                     anchors.rightMargin: 6
                     radius: height / 2
-                    color: row.primary ? Theme.fg
-                         : (row.isOpen && !sidebar.active ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.06)
-                                   : hov.hovered ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.04) : "transparent")
+                    color: row.primary ? sidebar.primaryFill
+                         : row.isOpen ? Theme.surface1
+                         : hov.hovered ? Theme.surface : "transparent"
+                    border.width: row.primary ? 1 : 0
+                    border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
                 }
 
                 // relative line number (vim hybrid: absolute on cursor row),
@@ -343,7 +348,7 @@ Rectangle {
                     text: sidebar.threadsSelected ? row.index + 2
                         : sidebar.mentionsSelected ? row.index + 1
                         : Math.abs(row.index - list.currentIndex)
-                    color: row.primary ? Theme.bg : Theme.fg
+                    color: Theme.fg
                     opacity: 0.65
                     font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
                     font.pixelSize: 12
@@ -355,7 +360,7 @@ Rectangle {
                     visible: sidebar.active && row.cursor && !sidebar.threadsSelected && !sidebar.mentionsSelected
                     anchors.left: parent.left; anchors.leftMargin: 20
                     anchors.verticalCenter: parent.verticalCenter
-                    width: 3; height: 16; radius: 2; color: Theme.cursor
+                    width: 3; height: 16; radius: 2; color: Theme.fg
                 }
 
                 Row {
@@ -374,14 +379,14 @@ Rectangle {
                             anchors.centerIn: parent
                             visible: row.kind !== "voice" && !(row.kind === "dm" && dmAv.status === Image.Ready)
                             text: row.kind === "dm" ? "●" : "#"
-                            color: row.kind === "dm" ? Theme.green : (row.primary ? Theme.bg : Theme.fg_muted)
+                            color: row.kind === "dm" ? Theme.green : (row.primary ? Theme.fg : Theme.fg_muted)
                             font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: row.kind === "dm" ? 10 : 14
                         }
                         Icon {
                             anchors.centerIn: parent
                             visible: row.kind === "voice"
                             name: "volume-up"; width: 13; height: 13
-                            color: row.primary ? Theme.bg : Theme.fg_muted
+                            color: row.primary ? Theme.fg : Theme.fg_muted
                         }
                         ClippingRectangle {
                             anchors.centerIn: parent; width: 18; height: 18; radius: 9
@@ -402,7 +407,7 @@ Rectangle {
                             - (chStatus.visible ? chStatus.width + parent.spacing : 0)
                         width: Math.min(implicitWidth, avail)
                         text: row.name; elide: Text.ElideRight
-                        color: row.primary ? Theme.bg
+                        color: row.primary ? Theme.fg
                              : row.muted ? Theme.dimmedFg
                              : (row.unread > 0 || row.isOpen || row.cursor) ? Theme.fg : Theme.dimmedFg
                         font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 14
@@ -437,7 +442,7 @@ Rectangle {
                     anchors.right: parent.right; anchors.rightMargin: row.muted ? 38 : 22
                     anchors.verticalCenter: parent.verticalCenter
                     text: row.unread
-                    color: row.primary ? Theme.bg : Theme.fg_muted
+                    color: row.primary ? Theme.fg : Theme.fg_muted
                     font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
                     font.pixelSize: 13; font.weight: 400
                 }

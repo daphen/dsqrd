@@ -503,7 +503,7 @@ FloatingWindow {
         Rectangle {
             anchors.fill: parent
             // reference layout: flat canvas, panes float as cards on it
-            color: Theme.bg_alt
+            color: Theme.bgDim
 
             Row {
                 id: mainRow
@@ -580,6 +580,7 @@ FloatingWindow {
                                   leftMargin: 4 + 8 * (1 - Math.min(1, sidebar.width / 264))
                                   rightMargin: 12; bottomMargin: 12 }
                         // focused-panel accent: the mlqs inbox hairline
+                        color: Theme.bg
                         border.width: 1
                         border.color: (win.focusedPanel === "messages" && !Backend.threadOpen)
                                     ? Theme.hairlineSoft : "transparent"
@@ -725,7 +726,7 @@ FloatingWindow {
                         Row {
                             id: sbRow; anchors.centerIn: parent; spacing: 8
                             Rectangle {
-                                width: 8; height: 8; radius: 4; color: Theme.cursor
+                                width: 8; height: 8; radius: 4; color: Theme.electric
                                 anchors.verticalCenter: parent.verticalCenter
                                 SequentialAnimation on opacity {
                                     running: Backend.summaryLoading; loops: Animation.Infinite
