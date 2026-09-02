@@ -241,6 +241,7 @@ Item {
             wrapMode: Text.Wrap
             font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 15
             onLinkActivated: link => { if (link.indexOf("emoji:") !== 0) Backend.openUrl(link) }
+            onHoveredLinkChanged: del.z = hoveredLink.indexOf("emoji:") === 0 ? 100 : 0
             Rectangle {
                 visible: bodyText.hoveredLink.indexOf("emoji:") === 0
                 x: 0; y: bodyText.height + 2
@@ -287,7 +288,11 @@ Item {
                         color: Theme.mode === "light" ? Theme.ink : Theme.fg
                         font.family: "Noto Color Emoji"; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 36
                     }
-                    HoverHandler { id: emojiHover; enabled: !!part.modelData.name }
+                    HoverHandler {
+                        id: emojiHover
+                        enabled: !!part.modelData.name
+                        onHoveredChanged: del.z = hovered ? 100 : 0
+                    }
                     Rectangle {
                         visible: emojiHover.hovered
                         x: 0; y: part.height + 2
@@ -609,7 +614,10 @@ Item {
                     HoverHandler {
                         id: reactionHover
                         cursorShape: Qt.PointingHandCursor
-                        onHoveredChanged: if (hovered) Backend.fetchReactors(del)
+                        onHoveredChanged: {
+                            del.z = hovered ? 100 : 0
+                            if (hovered) Backend.fetchReactors(del)
+                        }
                     }
                     TapHandler { onTapped: Backend.toggleReaction(del, reactionPill.modelData.name) }
                     Rectangle {

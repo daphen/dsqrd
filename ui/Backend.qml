@@ -175,7 +175,7 @@ Item {
         const byName = {}
         const rs = reactions || []
         for (let i = 0; i < rs.length; i++) byName[rs[i].name] = rs[i].users || []
-        const m = _reactors; m[ts] = byName; _reactors = m
+        const m = Object.assign({}, _reactors); m[ts] = byName; _reactors = m
         reactorsReady(ts)
     }
     // Unfollow a thread from the Threads view: tell slkd, and drop it locally
