@@ -36,7 +36,7 @@ Built for **Linux + Wayland** — the [niri](https://github.com/YaLTeR/niri) com
 | **dbus + a notification server** (your Quickshell bar, or mako/dunst) | desktop notifications |
 | **swayidle** | presence (active/away → gates phone notifications) |
 | **wl-clipboard** (`wl-copy` / `wl-paste`) | paste/copy images |
-| **imv** + **mpv** | viewing images/video (`v`), via `~/.config/endcord/media-viewer.sh` |
+| **imv** + **mpv** | viewing images/video (`v`), via `~/.config/qs-chat-clients/media-viewer.sh` |
 
 ### slqs (Slack)
 - **Go** (build-time). Produces a self-contained binary; all libraries (slack-go, gorilla/websocket, godbus, esiqveland/notify, …) are compiled in. Uses **pure-Go SQLite** (`modernc.org/sqlite`) — no system SQLite, no cgo.
@@ -65,7 +65,7 @@ cd ~/personal/dsqrd
 
 **4. UI** — both apps load `~/personal/slk-gui-proto/`. After editing it, run `./sync-ui.sh` to vendor it into `slqs/ui/` and `dsqrd/ui/`.
 
-**5. Media viewer** — `v` expects `~/.config/endcord/media-viewer.sh` (routes images to `imv`, video to `mpv`).
+**5. Media viewer** — `v` uses `~/.config/qs-chat-clients/media-viewer.sh` (routes images to `imv`, video to `mpv`).
 
 ## Authentication
 
