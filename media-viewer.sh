@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -e
 
-ctl="$(command -v mediactl || true)"
-profile_ctl="/etc/profiles/per-user/${USER:-${LOGNAME:-daphen}}/bin/mediactl"
-if [[ -n "$ctl" ]]; then
-    exec "$ctl" view "$@"
-elif [[ -x "$profile_ctl" ]]; then
-    exec "$profile_ctl" view "$@"
-fi
-
 target=$1
 type=${2:-img}
 mapfile -t files <<< "$target"

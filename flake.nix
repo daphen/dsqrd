@@ -44,7 +44,7 @@
         text = ''
           export QML2_IMPORT_PATH="$HOME/.local/share/qml:${daemon}/share/dsqrd/ui/vendor''${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
           export SLK_SOCK=dsqrd
-          export SLK_MEDIA_VIEWER="${daemon}/share/dsqrd/media-viewer.sh"
+          export SLK_MEDIA_VIEWER="''${SLK_MEDIA_VIEWER:-${daemon}/share/dsqrd/media-viewer.sh}"
           sock="$XDG_RUNTIME_DIR/dsqrd.sock"
 
           # a UI is already up (window stays mapped in this app — jump-or-exec
