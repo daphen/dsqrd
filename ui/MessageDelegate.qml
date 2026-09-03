@@ -26,6 +26,8 @@ Item {
     required property string day
     required property string ts
     readonly property bool isReply: replyAuthor.length > 0 || replyText.length > 0
+    readonly property bool hidden: Backend.messageHidden(ts, text)
+    readonly property bool displayGrouped: grouped && !hidden
     // Per-row date divider: shown when this is the first message of its day (channel
     // only). Replaces the ListView section, which mis-dated rows after image reflows.
     readonly property string _prevDay: (ListView.view && index > 0) ? (ListView.view.model.get(index - 1).day || "") : ""
@@ -34,7 +36,7 @@ Item {
     width: ListView.view ? ListView.view.width : 600
     // extra height must match body's top margin so top/bottom padding stay even
     // (a grouped message with a reply line uses the larger 7px top margin).
-    implicitHeight: _dayPad + body.implicitHeight + ((grouped && !isReply) ? 6 : 14)
+    implicitHeight: _dayPad + body.implicitHeight + ((displayGrouped && !isReply) ? 6 : 14)
     // pending optimistic send: lighter until the server echo lands, then fade in
     opacity: pending ? 0.5 : 1.0
     Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
@@ -76,6 +78,7 @@ Item {
 
     // Brief accent pulse when this row is jumped to via a permalink.
     Rectangle {
+        visible: !del.hidden
         anchors { top: parent.top; topMargin: del._dayPad; left: parent.left; right: parent.right; bottom: parent.bottom }
         color: Theme.sky
         opacity: (del.ListView.view && del.ListView.view.flashIndex === del.index) ? 0.28 : 0
@@ -87,6 +90,7 @@ Item {
     // sync — fade in, hold, and fade out as one motion.
     Rectangle {
         id: copyFlash
+        visible: !del.hidden
         anchors { top: parent.top; topMargin: del._dayPad; left: parent.left; right: parent.right; bottom: parent.bottom }
         color: Qt.darker(Theme.selection, 1.03)   // copy = a touch darker than the full highlight
         opacity: cursorMark.showCopy ? 1 : 0
@@ -104,8 +108,8 @@ Item {
         // Center on the avatar (pfp) for a leading message; for a grouped message
         // (no avatar) center on its single text line instead.
         anchors.top: parent.top
-        anchors.topMargin: (del.grouped ? 3 : 9) + del._dayPad
-        height: del.grouped ? 20 : 36
+        anchors.topMargin: (del.displayGrouped ? 3 : 9) + del._dayPad
+        height: del.displayGrouped ? 20 : 36
         // Cursor marker that briefly morphs into a copy icon when this row is
         // copied — transitions.dev icon-swap (250ms ease-in-out, scale 0.25).
         Item {
@@ -153,12 +157,12 @@ Item {
     Item {
         id: gutter
         x: 34; width: 40
-        anchors.top: parent.top; anchors.topMargin: (del.grouped ? 3 : 9) + del._dayPad
+        anchors.top: parent.top; anchors.topMargin: (del.displayGrouped ? 3 : 9) + del._dayPad
         height: 40
         // Text OUTSIDE the clip: ClippingRectangle rasterizes children at
         // 1x DPR, blurring glyphs on a fractional-scale monitor.
         Rectangle {
-            visible: !del.grouped
+            visible: !del.displayGrouped
             width: 36; height: 36; radius: 8
             color: del.color                    // colored fallback behind the image
 
@@ -181,7 +185,7 @@ Item {
             }
         }
         Text { renderTypeQuality: Text.VeryHighRenderTypeQuality;
-            visible: del.grouped && hov.hovered
+            visible: del.displayGrouped && hov.hovered
             anchors.horizontalCenter: parent.horizontalCenter; y: 1
             text: del.time; color: Theme.fg_muted; font.features: ({ "tnum": 1 })
             font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 11
@@ -192,12 +196,12 @@ Item {
         id: body
         anchors.left: gutter.right; anchors.leftMargin: 10
         anchors.right: parent.right; anchors.rightMargin: 18
-        anchors.top: parent.top; anchors.topMargin: (del.grouped && !del.isReply ? 3 : 7) + del._dayPad
+        anchors.top: parent.top; anchors.topMargin: (del.displayGrouped && !del.isReply ? 3 : 7) + del._dayPad
         spacing: 3
 
         // reply context (Discord): "↰ author  quoted snippet" above the message
         Row {
-            visible: del.isReply
+            visible: !del.hidden && del.isReply
             width: parent.width
             spacing: 5
             Text { renderTypeQuality: Text.VeryHighRenderTypeQuality; text: "↰"; color: Theme.fg_muted
@@ -211,7 +215,7 @@ Item {
         }
 
         Row {
-            visible: !del.grouped
+            visible: !del.displayGrouped
             spacing: 8
             Text { renderTypeQuality: Text.VeryHighRenderTypeQuality; text: del.author; color: Theme.mode === "light" ? Theme.ink : Theme.fg
                    font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 15; font.weight: 500 }
@@ -225,14 +229,21 @@ Item {
         }
 
         Text {
+            visible: del.hidden
+            text: "Hidden"; color: Theme.fg_muted
+            font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
+            font.pixelSize: 13; font.italic: true
+        }
+
+        Text {
             id: bodyText
             renderTypeQuality: Text.VeryHighRenderTypeQuality
-            visible: del.text.length > 0 && !del.emojiOnly
+            visible: !del.hidden && del.text.length > 0 && !del.emojiOnly
             width: parent.width
             z: hoveredLink.indexOf("emoji:") === 0 ? 20 : 0
             // grouped rows have no visible header, so the marker rides the body there
             text: Backend.richify(del.text, 22)
-                  + (del.edited && del.grouped ? " <span style='font-size:11px;color:" + Theme.fg_muted + "'>(edited)</span>" : "")
+                  + (del.edited && del.displayGrouped ? " <span style='font-size:11px;color:" + Theme.fg_muted + "'>(edited)</span>" : "")
             // Light mode: plain black body text (the theme's secondary fg is a
             // purple that reads wrong for message content). Dark mode: fg (#EDEDED),
             // the same near-white neovim's Normal text uses.
@@ -261,7 +272,7 @@ Item {
         // emoji antialias when scaled (inline rich-text <img> does not). AnimatedImage
         // also animates gif/animated custom emoji.
         Flow {
-            visible: del.emojiOnly && del.text.length > 0
+            visible: !del.hidden && del.emojiOnly && del.text.length > 0
             width: parent.width; spacing: 4
             Repeater {
                 model: del.emojiOnly ? Backend.emojiParts(del.text) : []
@@ -312,6 +323,7 @@ Item {
 
         // image attachments (thumbnails, downloaded locally by export/slkd)
         Column {
+            visible: !del.hidden
             spacing: 4; topPadding: del.images.length > 0 ? 2 : 0
             Repeater {
                 model: del.images
@@ -577,7 +589,7 @@ Item {
 
         // reaction pills
         Flow {
-            visible: del.reactions.length > 0
+            visible: !del.hidden && del.reactions.length > 0
             width: parent.width; spacing: 5; topPadding: 2
             Repeater {
                 model: del.reactions
@@ -644,7 +656,7 @@ Item {
         // broadcast — a thread reply also sent to the channel. In the channel it
         // reads "replied to a thread"; in the thread it reads "also sent to channel".
         Text { renderTypeQuality: Text.VeryHighRenderTypeQuality;
-            visible: del.subtype === "thread_broadcast"
+            visible: !del.hidden && del.subtype === "thread_broadcast"
             topPadding: 3
             text: del.inThread ? "↪ also sent to channel" : "↪ replied to a thread"
             color: Theme.fg_muted
@@ -652,7 +664,7 @@ Item {
         }
         // thread indicator — Enter opens it
         Text { renderTypeQuality: Text.VeryHighRenderTypeQuality;
-            visible: del.reply_count > 0
+            visible: !del.hidden && del.reply_count > 0
             topPadding: 3
             text: "  " + del.reply_count + (del.reply_count === 1 ? " reply" : " replies")
             color: Theme.sky

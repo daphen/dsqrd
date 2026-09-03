@@ -55,6 +55,9 @@ Item {
     // no `prefs` event, so slqs stays in-memory). The daemon replays `prefs` on
     // bootstrap; prefsLoaded() lets shell.qml apply sidebar/recents/last channel.
     property var prefs: ({})
+    property var hiddenMessageIds: ({})
+    property var shownMessageIds: ({})
+    property var hiddenTextFilters: []
     signal prefsLoaded()
 
     // Voice call (dsqrd): a hidden Helium hosts the call; the daemon reports state.
@@ -62,6 +65,59 @@ Item {
     property bool callMuted: false
     property string callChannel: ""
     function savePrefs(patch) { safeWrite(JSON.stringify({ type: "savePrefs", prefs: patch }) + "\n") }
+    function _hiddenKey(channel, ts) { return channel + ":" + ts }
+    function _persistHidden() {
+        const patch = {
+            hiddenMessageIds: hiddenMessageIds,
+            shownMessageIds: shownMessageIds,
+            hiddenTextFilters: hiddenTextFilters
+        }
+        prefs = Object.assign({}, prefs, patch)
+        savePrefs(patch)
+    }
+    function _matchesHiddenText(text) {
+        const haystack = (text || "").toLowerCase()
+        for (let i = 0; i < hiddenTextFilters.length; i++)
+            if (haystack.indexOf(hiddenTextFilters[i].toLowerCase()) >= 0) return true
+        return false
+    }
+    function messageHidden(ts, text) {
+        if (isSlack || !ts) return false
+        const key = _hiddenKey(currentChannelId, ts)
+        return hiddenMessageIds[key] === true
+            || (_matchesHiddenText(text) && shownMessageIds[key] !== true)
+    }
+    function toggleMessageHidden(msg) {
+        if (isSlack || !msg || !msg.ts) return
+        const key = _hiddenKey(currentChannelId, msg.ts)
+        const hidden = messageHidden(msg.ts, msg.text)
+        const ids = Object.assign({}, hiddenMessageIds)
+        const shown = Object.assign({}, shownMessageIds)
+        if (hidden) { delete ids[key]; shown[key] = true }
+        else { ids[key] = true; delete shown[key] }
+        hiddenMessageIds = ids
+        shownMessageIds = shown
+        _persistHidden()
+        reflowList()
+        toast(hidden ? "Message shown" : "Message hidden")
+    }
+    function toggleHiddenTextFilter(text) {
+        const value = (text || "").trim()
+        if (isSlack || value.length === 0) return false
+        const filters = hiddenTextFilters.slice()
+        const lower = value.toLowerCase()
+        let found = -1
+        for (let i = 0; i < filters.length; i++)
+            if (filters[i].toLowerCase() === lower) { found = i; break }
+        if (found >= 0) filters.splice(found, 1)
+        else filters.push(value)
+        hiddenTextFilters = filters
+        if (found < 0) shownMessageIds = ({})
+        _persistHidden()
+        reflowList()
+        toast(found >= 0 ? "Text filter removed" : "Matching messages hidden")
+        return true
+    }
     // `U` → run the host's apply command. Detect-only: the app never self-updates;
     // SLK_UPDATE_CMD is the host's "apply" step (e.g. bump the flake + rebuild +
     // restart). Runs via `sh -c` so the command can spawn its own terminal for sudo.
@@ -1173,7 +1229,14 @@ Item {
         else if (e.type === "replyCountInc") bumpReplyCount(e.channel, e.ts)
         else if (e.type === "workspaces") setWorkspaces(e.workspaces, e.rail, e.threads)
         else if (e.type === "updateAvailable") { updateCurrent = e.current || ""; updateLatest = e.latest || ""; updateChangelog = e.changelog || []; updateAvailable = true }
-        else if (e.type === "prefs") { prefs = e.prefs || ({}); prefsLoaded() }
+        else if (e.type === "prefs") {
+            prefs = e.prefs || ({})
+            hiddenMessageIds = Object.assign({}, prefs.hiddenMessageIds || ({}))
+            shownMessageIds = Object.assign({}, prefs.shownMessageIds || ({}))
+            hiddenTextFilters = (prefs.hiddenTextFilters || []).slice()
+            prefsLoaded()
+            reflowList()
+        }
         else if (e.type === "users") { _usersByWs = e.users || ({}) }
         else if (e.type === "reaction") applyReaction(e.channel, e.ts, e.reactionsJson)
         else if (e.type === "images") applyImages(e.channel, e.ts, e.imagesJson)

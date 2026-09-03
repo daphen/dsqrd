@@ -325,7 +325,8 @@ FloatingWindow {
             "i":        { act: () => { focusPanel("messages"); composer.focusInput() }, help: "Compose", cat: "msg" },
             "R":        { act: () => { if (focusedPanel === "messages") { composer.startReply(msgs.currentMessage()); focusPanel("messages") } }, help: () => Backend.hasThreads ? "Reply in thread" : "Reply to message", cat: "msg" },
             "e":        { act: () => { if (focusedPanel === "messages") { const m = msgs.currentMessage(); if (m && m.mine) composer.startEdit(m) } }, help: "Edit your message", cat: "msg" },
-            "D":        { act: () => { if (focusedPanel === "messages") askDelete(msgs.currentMessage()) }, help: "Delete your message", cat: "msg" },
+            "D":        { act: () => { if (focusedPanel !== "messages") return; const m = msgs.currentMessage(); if (!m) return; if (win.isDiscord && !m.mine) Backend.toggleMessageHidden(m); else askDelete(m) }, help: () => win.isDiscord ? "Delete yours / hide others" : "Delete your message", cat: "msg" },
+            "H":        { act: () => { if (win.isDiscord) hideFilter.showFilter() }, help: () => win.isDiscord ? "Hide matching text" : "", cat: "msg" },
             "S":        { act: () => { if (focusedPanel !== "messages") return; const m = msgs.currentMessage(); const f = Backend.fileAttachment(m); if (f) Backend.downloadFile(f); else Backend.downloadMedia(m) }, help: "Save media", cat: "msg" },
             "r":        { act: () => { if (focusedPanel === "messages") reactTo(msgs.currentMessage())
                                        else if (focusedPanel === "sidebar") sidebar.markCurrentRead() },
@@ -399,7 +400,8 @@ FloatingWindow {
             "Y":      { act: () => Backend.copyLink(thread.currentMessage()), help: "Copy message link", cat: "msg" },
             "a":      { act: () => { if (Backend.messageActionEnabled) Backend.runMessageAction(thread.currentMessage()) }, help: () => Backend.messageActionEnabled ? "Custom message action" : "", cat: "msg" },
             "e":      { act: () => { const m = thread.currentMessage(); if (m && m.mine) thread.startEdit(m) }, help: "Edit your message", cat: "msg" },
-            "D":      { act: () => askDelete(thread.currentMessage()), help: "Delete your message", cat: "msg" },
+            "D":      { act: () => { const m = thread.currentMessage(); if (!m) return; if (win.isDiscord && !m.mine) Backend.toggleMessageHidden(m); else askDelete(m) }, help: () => win.isDiscord ? "Delete yours / hide others" : "Delete your message", cat: "msg" },
+            "H":      { act: () => { if (win.isDiscord) hideFilter.showFilter() }, help: () => win.isDiscord ? "Hide matching text" : "", cat: "msg" },
             "S":      { act: () => { const m = thread.currentMessage(); const f = Backend.fileAttachment(m); if (f) Backend.downloadFile(f); else Backend.downloadMedia(m) }, help: "Save media", cat: "msg" },
             "ctrl+k": { act: () => palette.show(), help: "Jump palette", cat: "chats" },
             "ctrl+o": { act: () => Backend.toggleLastChannel(), help: "Last channel", cat: "chats" },
@@ -910,6 +912,56 @@ FloatingWindow {
                 property var target: null
                 onConfirmed: { if (target) Backend.deleteMessage(target); target = null }
                 onOpenChanged: if (!open) win.backToNormal()
+            }
+
+            Modal {
+                id: hideFilter
+                z: 102
+                panelWidth: Math.round(Math.min(440, width - 80))
+
+                function submit() {
+                    if (Backend.toggleHiddenTextFilter(filterInput.text)) close()
+                }
+                function showFilter() {
+                    filterInput.text = ""
+                    show()
+                    Qt.callLater(filterInput.forceActiveFocus)
+                }
+
+                onClosed: win.backToNormal()
+
+                header: Text {
+                    width: parent.width
+                    text: "What do you want to hide?"
+                    color: Theme.fg
+                    font.family: Theme.fontFamily; font.pixelSize: 16; font.weight: 500
+                }
+                footer: Text {
+                    text: "enter  add / remove exact filter    esc  cancel"
+                    color: Theme.fg_muted
+                    font.family: Theme.fontFamily; font.pixelSize: 12
+                }
+                Rectangle {
+                    width: parent.width; height: 44; radius: 12
+                    color: Theme.surface
+                    border.width: filterInput.activeFocus ? 1.5 : 1
+                    border.color: filterInput.activeFocus ? Theme.hairline : Theme.hairlineSoft
+                    TextInput {
+                        id: filterInput
+                        anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14
+                        verticalAlignment: TextInput.AlignVCenter
+                        color: Theme.fg; clip: true; selectByMouse: true
+                        font.family: Theme.fontFamily; font.pixelSize: 14
+                        onAccepted: hideFilter.submit()
+                        Keys.onEscapePressed: e => { hideFilter.close(); e.accepted = true }
+                        Text {
+                            visible: filterInput.text.length === 0
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Match a string"
+                            color: Theme.fg_muted; font: filterInput.font
+                        }
+                    }
+                }
             }
 
             ConfirmDialog {
