@@ -686,6 +686,8 @@ def map_msg(m):
         body = ""
     if unfurls:
         body = (body + ("\n" if body else "") + "\n".join(unfurls)).strip()
+    if not body and not imgs:
+        body = "Unsupported message type"
     rx = []
     for r in m.get("reactions", []) or []:
         eid = r.get("emoji_id")
