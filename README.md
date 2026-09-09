@@ -69,7 +69,7 @@ cd ~/personal/dsqrd
 
 ## Authentication
 
-You provide your own session token; storage locations:
+The clients store session credentials locally:
 
 - **slqs (Slack)** — per-workspace files at `~/.local/share/slqs/tokens/<teamID>.json`:
   ```json
@@ -77,7 +77,7 @@ You provide your own session token; storage locations:
   ```
   Both come from a logged-in Slack **web** session.
 
-- **dsqrd (Discord)** — read from the system keyring (via `secret-tool`) or plaintext `~/.config/dsqrd/profiles.json` (endcord-compatible):
+- **dsqrd (Discord)** — when no saved session exists, the client shows a QR code to approve with the official Discord mobile app and stores the approved session in the system keyring via `secret-tool`. An endcord-compatible plaintext `~/.config/dsqrd/profiles.json` remains a fallback:
   ```json
   { "selected": "me", "profiles": [ { "name": "me", "token": "…" } ] }
   ```

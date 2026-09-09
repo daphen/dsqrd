@@ -504,6 +504,7 @@ FloatingWindow {
 
         Rectangle {
             anchors.fill: parent
+            visible: Backend.authState === "signedIn"
             // reference layout: flat canvas, panes float as cards on it
             color: Theme.bgDim
 
@@ -1085,6 +1086,11 @@ FloatingWindow {
                 }
             }
 
+        }
+
+        AuthPage {
+            anchors.fill: parent
+            visible: Backend.authState !== "signedIn"
         }
     }
 

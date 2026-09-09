@@ -37,6 +37,13 @@ Item {
     property string currentChannel: ""     // display name of the open channel
     property string currentChannelId: ""   // wire key (globally-unique Slack id)
     property string currentTopic: ""
+    property string authState: Quickshell.env("SLK_SOCK") === "dsqrd" ? "connecting" : "signedIn"
+    property string authQrPath: ""
+    property string authAccount: ""
+    property string authMessage: ""
+    property int authRemaining: 0
+    function startAuth() { safeWrite(JSON.stringify({ type: "startAuth" }) + "\n") }
+    function cancelAuth() { safeWrite(JSON.stringify({ type: "cancelAuth" }) + "\n") }
     property bool   typing: false
     property string typingWho: ""
     property bool   threadTyping: false
@@ -1238,6 +1245,15 @@ Item {
             reflowList()
         }
         else if (e.type === "users") { _usersByWs = e.users || ({}) }
+        else if (e.type === "auth") {
+            authState = e.state || "signedOut"
+            if (e.qr) authQrPath = e.qr
+            else if (authState === "signedOut" || authState === "error" || authState === "signedIn") authQrPath = ""
+            if (e.account) authAccount = e.account
+            else if (authState === "signedOut" || authState === "error" || authState === "signedIn") authAccount = ""
+            authMessage = e.message || ""
+            authRemaining = e.remaining || 0
+        }
         else if (e.type === "reaction") applyReaction(e.channel, e.ts, e.reactionsJson)
         else if (e.type === "images") applyImages(e.channel, e.ts, e.imagesJson)
         else if (e.type === "delete") applyDelete(e.channel, e.ts)

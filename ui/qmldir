@@ -23,3 +23,4 @@ LinkPicker LinkPicker.qml
 SummarizePicker SummarizePicker.qml
 SummaryModal SummaryModal.qml
 SummarizeSetup SummarizeSetup.qml
+AuthPage AuthPage.qml

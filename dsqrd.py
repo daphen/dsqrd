@@ -40,7 +40,7 @@ import websocket   # CDP client for the hidden voice Helium (also a dchat dep)
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dchat import client_properties, discord as discord_mod, gateway as gateway_mod, token
+from dchat import client_properties, discord as discord_mod, gateway as gateway_mod, remote_auth, token
 from dchat.notifier import Notifier
 
 SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "dsqrd.sock")
@@ -126,7 +126,7 @@ def load_token():
     tok = _token_from(token.load_plain("~/.config/dsqrd/profiles.json"))
     if tok:
         return tok
-    sys.exit("dsqrd: no Discord token found (put one in ~/.config/dsqrd/profiles.json)")
+    return None
 
 
 CDN = "https://cdn.discordapp.com"
@@ -902,12 +902,14 @@ class VoiceCall:
 class DQS:
     def __init__(self):
         self.token = load_token()
-        cp = client_properties.get_default_properties()
-        self.user_agent = cp["browser_user_agent"]
-        cp_gateway = client_properties.add_for_gateway(cp)
-        cp_enc = client_properties.encode_properties(cp)
-        self.discord = discord_mod.Discord(self.token, None, cp_enc, self.user_agent)
-        self.gateway = gateway_mod.Gateway(self.token, None, cp_gateway, self.user_agent)
+        self.client_props = client_properties.get_default_properties()
+        self.user_agent = self.client_props["browser_user_agent"]
+        self.discord = None
+        self.gateway = None
+        self.signed_in = False
+        self.auth_status = {"type": "auth", "state": "connecting" if self.token else "signedOut"}
+        self.auth_session = None
+        self.auth_lock = threading.Lock()
         self.guilds = []          # [{id,name,channels:[...]}]
         self.dms = []             # [{id,type,name,recipients}]
         self.chan_guild = {}      # channel id -> workspace id (guild_id or DM_WS)
@@ -956,6 +958,91 @@ class DQS:
             except Exception:
                 pass
 
+    def _set_auth(self, state, **fields):
+        self.auth_status = {"type": "auth", "state": state, **fields}
+        self.broadcast(self.auth_status)
+
+    def start_auth(self):
+        with self.auth_lock:
+            if self.auth_session is not None or self.signed_in:
+                return
+            self.auth_session = remote_auth.RemoteAuth(
+                self.user_agent,
+                lambda event: self._set_auth(event.pop("state"), **event),
+            )
+        threading.Thread(target=self._run_auth, daemon=True).start()
+
+    def cancel_auth(self):
+        with self.auth_lock:
+            if self.auth_session:
+                self.auth_session.cancel()
+                self._set_auth("signedOut")
+
+    def _run_auth(self):
+        session = self.auth_session
+        credential = session.run()
+        with self.auth_lock:
+            self.auth_session = None
+        if not credential:
+            return
+        try:
+            token.save_secret(credential)
+        except Exception:
+            self._set_auth("error", message="Could not store the Discord session in Secret Service")
+            return
+        self.token = credential
+        self._connect_discord(credential)
+
+    def _connect_stored(self):
+        try:
+            self._connect_discord(self.token)
+        finally:
+            if not self.signed_in and self.auth_status.get("state") == "connecting":
+                self._set_auth("signedOut", message="The stored Discord session is no longer valid")
+
+    def _connect_discord(self, credential):
+        self._set_auth("connecting")
+        props_gateway = client_properties.add_for_gateway(self.client_props)
+        props_encoded = client_properties.encode_properties(self.client_props)
+        try:
+            self.discord = discord_mod.Discord(credential, None, props_encoded, self.user_agent)
+            self.gateway = gateway_mod.Gateway(credential, None, props_gateway, self.user_agent)
+            self.discord.get_my_id()
+        except SystemExit:
+            self.discord = None
+            self.gateway = None
+            self._set_auth("signedOut", message="The stored Discord session is no longer valid")
+            return
+        except Exception:
+            self.discord = None
+            self.gateway = None
+            self._set_auth("error", message="Could not connect to Discord")
+            return
+        threading.Thread(target=self.gateway.connect, daemon=True).start()
+        try:
+            ready = self.wait_ready()
+        except Exception:
+            ready = False
+        if not ready:
+            self.discord = None
+            self.gateway = None
+            self._set_auth("error", message="Discord did not finish connecting")
+            return
+        refreshed = self.gateway.get_token_update()
+        if refreshed:
+            try:
+                token.save_secret(refreshed)
+                self.token = refreshed
+            except Exception:
+                self.broadcast({"type": "error", "message": "Could not store Discord's refreshed session"})
+        self.signed_in = True
+        self._set_auth("signedIn")
+        with self.lock:
+            clients = list(self.conns)
+        for conn in clients:
+            self.send_bootstrap(conn)
+        self._start_workers()
+
     # ---- wire helpers ----
     def write(self, conn, obj):
         try:
@@ -983,10 +1070,14 @@ class DQS:
 
     # ---- startup snapshot ----
     def wait_ready(self):
+        ready = False
         for _ in range(120):
             if self.gateway.get_ready():
+                ready = True
                 break
             time.sleep(0.5)
+        if not ready:
+            return False
         # get_guilds returns the list once, then None until it changes
         for _ in range(40):
             g = self.gateway.get_guilds()
@@ -1026,6 +1117,7 @@ class DQS:
                 if r.get("id"):
                     self.user_names[str(r["id"])] = r.get("global_name") or r.get("username") or ""
         print(f"dsqrd: {len(self.guilds)} guilds, {len(self.dms)} DMs, {len(self.chan_name)} channels", flush=True)
+        return True
 
     def _build_emoji(self):
         """Index guild custom emoji (name -> id/animated) and write the picker
@@ -1128,6 +1220,9 @@ class DQS:
         self.write(conn, {"type": "prefs", "prefs": self.prefs})
         if self.update_event:   # replay update-available state to a (re)connecting client
             self.write(conn, self.update_event)
+        self.write(conn, self.auth_status)
+        if not self.signed_in:
+            return
         self.write(conn, self._workspaces_msg())
         self.write(conn, {"type": "users", "users": self.users_payload()})
         self.write(conn, self._channels_msg())
@@ -2386,6 +2481,14 @@ class DQS:
                     continue
                 t = cmd.get("type")
                 ch = cmd.get("channel")
+                if t == "startAuth":
+                    self.start_auth()
+                    continue
+                if t == "cancelAuth":
+                    self.cancel_auth()
+                    continue
+                if not self.signed_in:
+                    continue
                 if t in ("recent", "focus"):
                     self.active_ch = ch or None
                 if t == "recent":
@@ -2677,9 +2780,7 @@ class DQS:
                 self.broadcast({"type": "resync"})
             mono, wall = m, w
 
-    def run(self):
-        threading.Thread(target=self.gateway.connect, daemon=True).start()
-        self.wait_ready()
+    def _start_workers(self):
         try:
             self.notifier = Notifier("Discord", self._on_notif_activate)
         except Exception as e:
@@ -2693,6 +2794,10 @@ class DQS:
         threading.Thread(target=self.heartbeat, daemon=True).start()
         threading.Thread(target=self.check_updates, daemon=True).start()
         threading.Thread(target=self.refresh_guilds, daemon=True).start()
+
+    def run(self):
+        if self.token:
+            threading.Thread(target=self._connect_stored, daemon=True).start()
         self.serve()
 
 
