@@ -9,7 +9,6 @@ Rectangle {
     // sits directly on the window canvas — no own surface, no divider
     color: Theme.bgDim
     property bool active: true   // is this the focused panel?
-    readonly property color primaryFill: Theme.surface
     // freeze channel-list reordering while the user navigates here
     onActiveChanged: Backend.sidebarNavigating = active
     Component.onCompleted: Backend.sidebarNavigating = active
@@ -122,7 +121,7 @@ Rectangle {
                         width: Math.min(tabLbl.implicitWidth + 20, 110)
                         // Snap, don't animate: a color fade on the active tab reads as a
                         // "blink" when switching workspaces (same reason the msg cursor snaps).
-                        color: active ? Theme.surface1 : tabHov.hovered ? Theme.surface : "transparent"
+                        color: active ? Theme.itemSelected : tabHov.hovered ? Theme.itemHover : "transparent"
                         border.width: 0
                         Text { id: tabLbl; 
                             anchors.centerIn: parent; width: parent.width - 12; elide: Text.ElideRight
@@ -143,7 +142,7 @@ Rectangle {
                 anchors.fill: parent; radius: 6
                 anchors.leftMargin: 10; anchors.rightMargin: 10
                 anchors.topMargin: 9; anchors.bottomMargin: 9
-                color: wsHdrHov.hovered ? Theme.hover : "transparent"
+                color: wsHdrHov.hovered ? Theme.itemHover : "transparent"
                 Row {
                     anchors.left: parent.left; anchors.leftMargin: 4
                     anchors.verticalCenter: parent.verticalCenter; spacing: 6
@@ -178,9 +177,7 @@ Rectangle {
             visible: Backend.hasThreads
             width: parent.width; height: Backend.hasThreads ? 36 : 0; clip: true; radius: height / 2
             readonly property bool thPrimary: sidebar.threadsSelected && sidebar.active
-            color: thPrimary ? sidebar.primaryFill : thHov.hovered ? Theme.surface : "transparent"
-            border.width: thPrimary ? 1 : 0
-            border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
+            color: thPrimary ? Theme.itemCursor : thHov.hovered ? Theme.itemHover : "transparent"
             Row {
                 anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 8; spacing: 7
                 Text { anchors.verticalCenter: parent.verticalCenter
@@ -209,9 +206,7 @@ Rectangle {
             visible: Backend.hasThreads
             width: parent.width; height: Backend.hasThreads ? 36 : 0; clip: true; radius: height / 2
             readonly property bool mePrimary: sidebar.mentionsSelected && sidebar.active
-            color: mePrimary ? sidebar.primaryFill : meHov.hovered ? Theme.surface : "transparent"
-            border.width: mePrimary ? 1 : 0
-            border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
+            color: mePrimary ? Theme.itemCursor : meHov.hovered ? Theme.itemHover : "transparent"
             Row {
                 anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 8; spacing: 7
                 Text { anchors.verticalCenter: parent.verticalCenter
@@ -330,11 +325,9 @@ Rectangle {
                     anchors.leftMargin: 6
                     anchors.rightMargin: 6
                     radius: height / 2
-                    color: row.primary ? sidebar.primaryFill
-                         : row.isOpen ? Theme.surface1
-                         : hov.hovered ? Theme.surface : "transparent"
-                    border.width: row.primary ? 1 : 0
-                    border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
+                    color: row.primary ? Theme.itemCursor
+                         : row.isOpen ? Theme.itemSelected
+                         : hov.hovered ? Theme.itemHover : "transparent"
                 }
 
                 // relative line number (vim hybrid: absolute on cursor row),

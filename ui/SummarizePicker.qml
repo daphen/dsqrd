@@ -153,9 +153,7 @@ Modal {
                     anchors.leftMargin: 4; anchors.rightMargin: 4
                     anchors.topMargin: 1; anchors.bottomMargin: 1
                     radius: 13
-                    color: row.index === sp.sel ? Theme.selection : hov.hovered ? Theme.surface : "transparent"
-                    border.width: 1
-                    border.color: row.index === sp.sel ? Theme.hairline : "transparent"
+                    color: row.index === sp.sel ? Theme.itemCursor : hov.hovered ? Theme.itemHover : "transparent"
                 }
                 Text {
                     anchors.left: parent.left; anchors.leftMargin: 18
