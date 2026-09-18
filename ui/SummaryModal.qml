@@ -151,7 +151,7 @@ Modal {
             anchors.bottom: parent.bottom
             anchors.bottomMargin: sm.coverage.length ? 16 : -2
             text: sm.title; color: Theme.fg
-            font.family: sm.titleFont; font.pixelSize: 34; font.weight: 400
+            font.family: sm.titleFont; font.pixelSize: 34; font.weight: 400; font.capitalization: Font.AllUppercase
             font.letterSpacing: -0.3
         }
         Text {
