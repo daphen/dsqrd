@@ -9,7 +9,7 @@ import QsLib
 Modal {
     id: sm
     property string text: ""
-    property string title: "KOTTSUMLARY"
+    property string title: "Köttsumlary"
     property string meta: "WHILE AWAY"
     property string coverage: ""
     property int sel: 0
@@ -27,7 +27,7 @@ Modal {
 
     function showWith(t, ch, span) {
         text = t || ""
-        title = "KOTTSUMLARY"
+        title = "Köttsumlary"
         meta = (ch && ch.length) ? ("" + ch).toUpperCase() : "WHILE AWAY"
         coverage = span || ""
         sel = 0
@@ -136,7 +136,7 @@ Modal {
         width: parent.width; height: sm.coverage.length ? 58 : 40
         PineconeIcon {
             id: titleCone
-            visible: sm.title === "KOTTSUMLARY"
+            visible: sm.title === "Köttsumlary"
             width: 34; height: 34
             rotation: -18
             transformOrigin: Item.Center
@@ -151,7 +151,7 @@ Modal {
             anchors.bottom: parent.bottom
             anchors.bottomMargin: sm.coverage.length ? 16 : -2
             text: sm.title; color: Theme.fg
-            font.family: sm.titleFont; font.pixelSize: 34; font.weight: 400; font.capitalization: Font.AllUppercase
+            font.family: sm.titleFont; font.pixelSize: 34; font.weight: 400
             font.letterSpacing: -0.3
         }
         Text {
