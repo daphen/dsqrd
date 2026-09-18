@@ -26,7 +26,7 @@ Modal {
     chinBar: true
 
     readonly property var scopes: [
-        { key: "all_new",   label: "Since your last visit" },
+        { key: "all_new",   label: "Since you last spoke" },
         { key: "last_day",  label: "Last day" },
         { key: "last_week", label: "Last week" },
         { key: "user",      label: "From a specific person…" },

@@ -215,7 +215,7 @@ ANSWER_SYS = (
 # do_summarize/do_ask know the scope; without it the recap can't say what it covered.
 SPAN_LABELS = {
     "session": "the current burst of conversation, since the last long silence",
-    "all_new": "everything posted since the reader last left this channel (or their Discord read marker if no visit was recorded yet)",
+    "all_new": "everything posted since the reader last spoke in this channel before their current visit",
     "last_day": "the last 24 hours",
     "last_week": "the last week",
     "user": "one person's messages from the current conversation",
@@ -277,7 +277,7 @@ def emoji_url(emoji_id, animated=False):
 
 EMOJI_JSON = os.path.join(_data_dir(), "emoji-dsqrd.json")
 PREFS_JSON = os.path.join(_data_dir(), "prefs-dsqrd.json")
-VISIT_MARKERS_JSON = os.path.join(_data_dir(), "visit-markers.json")
+PARTICIPATION_MARKERS_JSON = os.path.join(_data_dir(), "participation-markers.json")
 SUMMARY_CHUNK_CHARS = 12000
 SUMMARY_NOTE_CHARS = 5000
 
@@ -957,7 +957,7 @@ class DQS:
         self._last_update_check = 0.0
         self.prefs = _load_prefs()   # persisted UI prefs, replayed on bootstrap
         self._prefs_lock = threading.Lock()
-        self._visit_markers = _load_json_dict(VISIT_MARKERS_JSON)
+        self._visit_markers = _load_json_dict(PARTICIPATION_MARKERS_JSON)
         self._visit_cutoffs = {}
         self._latest_messages = {}
         self._visit_lock = threading.Lock()
@@ -972,13 +972,6 @@ class DQS:
             except Exception:
                 pass
 
-    def _discord_read_marker(self, channel):
-        try:
-            state = (self.gateway.get_read_state() or {}).get(str(channel)) or {}
-            return int(state.get("last_acked_message_id") or 0)
-        except (TypeError, ValueError, AttributeError):
-            return 0
-
     def _enter_visit(self, channel):
         if not channel:
             return
@@ -988,7 +981,20 @@ class DQS:
                 cutoff = int(self._visit_markers.get(channel) or 0)
             except (TypeError, ValueError):
                 cutoff = 0
-            self._visit_cutoffs[channel] = cutoff or self._discord_read_marker(channel)
+            self._visit_cutoffs[channel] = cutoff
+
+    def _seed_participation_cutoff(self, channel, messages):
+        channel = str(channel)
+        with self._visit_lock:
+            if self._visit_cutoffs.get(channel) or self._visit_markers.get(channel):
+                return
+            for message in messages:
+                if str(message.get("user_id") or "") == str(self.my_id):
+                    try:
+                        self._visit_cutoffs[channel] = int(message.get("id") or 0)
+                    except (TypeError, ValueError):
+                        pass
+                    return
 
     def _leave_visit(self, channel):
         if not channel:
@@ -1005,17 +1011,19 @@ class DQS:
             updated = dict(self._visit_markers)
             updated[channel] = str(latest)
             try:
-                tmp = VISIT_MARKERS_JSON + ".tmp"
+                tmp = PARTICIPATION_MARKERS_JSON + ".tmp"
                 with open(tmp, "w") as f:
                     json.dump(updated, f, sort_keys=True)
-                os.replace(tmp, VISIT_MARKERS_JSON)
+                os.replace(tmp, PARTICIPATION_MARKERS_JSON)
             except OSError:
                 return
             self._visit_markers = updated
 
-    def _note_latest(self, channel, message_id):
+    def _note_latest(self, channel, message):
+        if str(message.get("user_id") or "") != str(self.my_id):
+            return
         try:
-            message_id = int(message_id or 0)
+            message_id = int(message.get("id") or 0)
         except (TypeError, ValueError):
             return
         channel = str(channel)
@@ -1310,9 +1318,9 @@ class DQS:
         except Exception:
             pass
         msgs = self.discord.get_messages(channel_id, num=50) or []
-        if msgs:
-            self._note_latest(channel_id, msgs[0].get("id"))
+        self._seed_participation_cutoff(channel_id, msgs)
         for m in msgs:
+            self._note_latest(channel_id, m)
             self.learn_participant(channel_id, m)
         out = [map_msg(m) for m in msgs]
         for mm in out:
@@ -1575,8 +1583,6 @@ class DQS:
                 cutoff = int(self._visit_cutoffs.get(channel) or self._visit_markers.get(channel) or 0)
             except (TypeError, ValueError):
                 cutoff = 0
-            if not cutoff:
-                cutoff = self._discord_read_marker(channel)
         if scope in ("last_day", "last_week"):
             secs = 86400 if scope == "last_day" else 604800
             time_cutoff = (int((time.time() - secs) * 1000) - DISCORD_EPOCH) << 22
@@ -2466,7 +2472,7 @@ class DQS:
             ws = m.get("guild_id") or DM_WS
             self.chan_guild[cid] = ws
         if op in ("MESSAGE_CREATE", "MESSAGE_CREATE_QUICK", "MESSAGE_UPDATE"):
-            self._note_latest(cid, m.get("id"))
+            self._note_latest(cid, m)
             if self.learn_participant(cid, m) and cid == self.active_ch:
                 self.broadcast({"type": "users", "users": self.users_payload(cid)})
             mm = map_msg(m)

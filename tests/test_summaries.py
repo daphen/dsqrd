@@ -63,7 +63,7 @@ def app_with(messages: list[dict[str, Any]], markers: dict[str, str] | None = No
 
 
 class SummaryBehaviorTest(unittest.TestCase):
-    def test_summary_pages_to_previous_visit_without_moving_the_boundary(self):
+    def test_summary_pages_to_previous_participation_without_moving_the_boundary(self):
         rows = [message(mid) for mid in range(1, 451)]
         app = app_with(rows, {"channel": "100"})
         app._visit_cutoffs["channel"] = 100
@@ -79,29 +79,34 @@ class SummaryBehaviorTest(unittest.TestCase):
         self.assertEqual(app._visit_markers["channel"], "100")
         self.assertEqual(len(app.discord.calls), 4)
 
-    def test_visit_boundary_advances_only_when_leaving_and_is_reused_on_return(self):
+    def test_participation_boundary_advances_from_own_messages_only(self):
         app = app_with([], {"channel": "100"})
         app._enter_visit("channel")
         self.assertEqual(app._visit_cutoffs["channel"], 100)
-        app._note_latest("channel", "150")
+        app._note_latest("channel", message(150, user_id="someone-else"))
+        app._note_latest("channel", message(140, user_id="reader"))
 
         with tempfile.TemporaryDirectory() as data, \
-             mock.patch.object(daemon, "VISIT_MARKERS_JSON", os.path.join(data, "visits.json")):
+             mock.patch.object(daemon, "PARTICIPATION_MARKERS_JSON", os.path.join(data, "participation.json")):
             app._leave_visit("channel")
             app._enter_visit("channel")
-            with open(daemon.VISIT_MARKERS_JSON) as f:
+            with open(daemon.PARTICIPATION_MARKERS_JSON) as f:
                 persisted = json.load(f)
 
-        self.assertEqual(persisted["channel"], "150")
-        self.assertEqual(app._visit_cutoffs["channel"], 150)
+        self.assertEqual(persisted["channel"], "140")
+        self.assertEqual(app._visit_cutoffs["channel"], 140)
 
-    def test_first_visit_uses_discord_read_marker(self):
+    def test_first_visit_uses_latest_own_message_before_current_sends(self):
         app = app_with([])
-        app.gateway = FakeGateway("90")
         app._enter_visit("channel")
+        app._seed_participation_cutoff("channel", [
+            message(100, user_id="someone-else"),
+            message(90, user_id="reader"),
+            message(80, user_id="reader"),
+        ])
         self.assertEqual(app._visit_cutoffs["channel"], 90)
 
-    def test_failed_summary_does_not_change_visit_boundary(self):
+    def test_failed_summary_does_not_change_participation_boundary(self):
         app = app_with([message(101)], {"channel": "100"})
         app._visit_cutoffs["channel"] = 100
         app._summarize_transcript = mock.Mock(side_effect=RuntimeError("provider failed"))
@@ -112,7 +117,7 @@ class SummaryBehaviorTest(unittest.TestCase):
         self.assertEqual(app._visit_markers["channel"], "100")
         self.assertEqual(app.events[-1]["type"], "summaryError")
 
-    def test_named_ranges_ignore_saved_visit_markers(self):
+    def test_named_ranges_ignore_saved_participation_markers(self):
         for scope in ("session", "last_day"):
             with self.subTest(scope=scope):
                 app = app_with([message(1), message(2), message(3)], {"channel": "2"})
