@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+from http.client import HTTPMessage
 import os
 import tempfile
 import threading
@@ -96,7 +97,7 @@ class RemoteAuthTest(unittest.TestCase):
     def test_ticket_exchange_failure_emits_safe_error(self):
         events = []
         socket = FakeSocket()
-        error = remote_auth.urllib.error.HTTPError(remote_auth.LOGIN_URL, 400, "bad", {}, io.BytesIO(b"{}"))
+        error = remote_auth.urllib.error.HTTPError(remote_auth.LOGIN_URL, 400, "bad", HTTPMessage(), io.BytesIO(b"{}"))
         with tempfile.TemporaryDirectory() as cache, \
              mock.patch.dict(os.environ, {"XDG_CACHE_HOME": cache}), \
              mock.patch.object(remote_auth.websocket, "create_connection", return_value=socket), \

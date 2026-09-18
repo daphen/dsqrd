@@ -3,17 +3,18 @@ import os
 import tempfile
 import threading
 import unittest
+from typing import Any
 from unittest import mock
 
 import dsqrd as daemon
 
 
 class FakeDiscord:
-    def __init__(self, messages):
+    def __init__(self, messages: list[dict[str, Any]]):
         self.messages = sorted(messages, key=lambda m: int(m["id"]), reverse=True)
-        self.calls = []
+        self.calls: list[tuple[Any, int, Any]] = []
 
-    def get_messages(self, channel, num=100, before=None):
+    def get_messages(self, channel: Any, num: int = 100, before: Any = None):
         self.calls.append((channel, num, before))
         rows = self.messages
         if before is not None:
@@ -22,14 +23,14 @@ class FakeDiscord:
 
 
 class FakeGateway:
-    def __init__(self, read_id="0"):
+    def __init__(self, read_id: str = "0"):
         self.read_id = read_id
 
     def get_read_state(self):
         return {"channel": {"last_acked_message_id": self.read_id}}
 
 
-def message(mid, content="message", **fields):
+def message(mid: int, content: str = "message", **fields: Any) -> dict[str, Any]:
     value = {
         "id": str(mid),
         "timestamp": "2026-09-16T10:00:00+00:00",
@@ -44,8 +45,8 @@ def message(mid, content="message", **fields):
     return value
 
 
-def app_with(messages, markers=None):
-    app = object.__new__(daemon.DQS)
+def app_with(messages: list[dict[str, Any]], markers: dict[str, str] | None = None) -> Any:
+    app: Any = object.__new__(daemon.DQS)
     app.discord = FakeDiscord(messages)
     app.gateway = FakeGateway()
     app.user_names = {}

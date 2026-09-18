@@ -37,6 +37,7 @@ import urllib.parse
 import urllib.request
 import websocket   # CDP client for the hidden voice Helium (also a dchat dep)
 from datetime import datetime
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dchat import client_properties, discord as discord_mod, gateway as gateway_mod, remote_auth, token
@@ -55,7 +56,7 @@ def _have_ffmpeg():
     if getattr(_have_ffmpeg, "_ok", False):
         return True
     ok = bool(shutil.which("ffmpeg")) and bool(shutil.which("ffprobe"))
-    _have_ffmpeg._ok = ok
+    setattr(_have_ffmpeg, "_ok", ok)
     return ok
 
 
@@ -912,8 +913,8 @@ class DQS:
         self.token = load_token()
         self.client_props = client_properties.get_default_properties()
         self.user_agent = self.client_props["browser_user_agent"]
-        self.discord = None
-        self.gateway = None
+        self.discord: Any = None
+        self.gateway: Any = None
         self.signed_in = False
         self.auth_status = {"type": "auth", "state": "connecting" if self.token else "signedOut"}
         self.auth_session = None
@@ -930,7 +931,7 @@ class DQS:
         self.chan_users = {}      # channel_id -> {uid: display name} — participants seen per channel
         self.emoji_by_name = {}   # custom emoji name -> (id, animated) for react/send resolution
         self.codemap = _load_codemap()   # standard shortcode name -> unicode glyph (for reactions)
-        self.notifier = None      # dbus notifier (clickable → open channel)
+        self.notifier: Any = None      # dbus notifier (clickable → open channel)
         self.app_active = False   # focus state reported by the connected UI
         self.focus_conn = None    # connection owning that focus claim
         self.user_names = {}      # user id -> display name (for DM typing indicators)
@@ -1043,6 +1044,7 @@ class DQS:
 
     def _run_auth(self):
         session = self.auth_session
+        assert session is not None
         credential = session.run()
         with self.auth_lock:
             self.auth_session = None

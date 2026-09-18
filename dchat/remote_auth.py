@@ -44,7 +44,8 @@ class RemoteAuth:
         os.makedirs(cache, mode=0o700, exist_ok=True)
         fd, path = tempfile.mkstemp(prefix="login-", suffix=".png", dir=cache)
         os.close(fd)
-        qrcode.make(url).save(path)
+        with open(path, "wb") as output:
+            qrcode.make(url).save(output)
         os.chmod(path, 0o600)
         self.qr_path = path
         self.emit({"state": "qr", "qr": path})
@@ -75,6 +76,7 @@ class RemoteAuth:
     def run(self):
         token = None
         heartbeat_at = None
+        heartbeat_interval = 30.0
         deadline = time.monotonic() + 100
         public_key = base64.b64encode(self.private_key.public_key().export_key(format="DER")).decode()
         try:
