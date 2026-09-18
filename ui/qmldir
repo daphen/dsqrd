@@ -5,6 +5,7 @@ MessageList MessageList.qml
 MessageDelegate MessageDelegate.qml
 StatusEmoji StatusEmoji.qml
 Composer Composer.qml
+PineconeIcon PineconeIcon.qml
 ThreadPanel ThreadPanel.qml
 ProfilePanel ProfilePanel.qml
 ChannelPalette ChannelPalette.qml

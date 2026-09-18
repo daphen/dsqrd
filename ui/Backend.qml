@@ -987,7 +987,6 @@ Item {
         m.grouped = last ? _grp(last, m) : false
         arr.push(m)
         messagesModel.append(m)
-        reflowList()
     }
     // Thread flavor of the same: append a pending reply to the open thread
     // instantly; the echo swaps into its slot below.
@@ -1033,7 +1032,6 @@ Item {
                 if (id === currentChannelId) {
                     for (let j = 0; j < messagesModel.count; j++)
                         if (messagesModel.get(j).ts === optTs) { messagesModel.set(j, msg); break }
-                    reflowList()   // swapped an item in place → re-flow so date dividers don't go stale
                 }
                 return true
             }
@@ -1259,7 +1257,8 @@ Item {
         else if (e.type === "delete") applyDelete(e.channel, e.ts)
         else if (e.type === "browse") { browseResults = e.channels || []; browseLoaded() }
         else if (e.type === "toast") { if (e.text) toast(e.text) }
-        else if (e.type === "summary") { summaryText = e.text || ""; lastSummaryText = summaryText; lastSummaryChannel = currentChannel; lastSummaryScope = aiScope; lastSummaryUser = aiUser; summaryLoading = false; summaryTimeout.stop(); summaryReady() }
+        else if (e.type === "summary") { summaryText = e.text || ""; summaryCoverage = e.coverage || ""; lastSummaryText = summaryText; lastSummaryChannel = e.channelName || currentChannel; lastSummaryCoverage = summaryCoverage; lastSummaryScope = aiScope; lastSummaryUser = aiUser; summaryLoading = false; summaryTimeout.stop(); summaryReady() }
+        else if (e.type === "summaryProgress") { if (summaryLoading) summaryTimeout.restart() }
         else if (e.type === "answer") { summaryText = e.text || ""; summaryLoading = false; summaryTimeout.stop(); answerReady(e.question || "") }
         else if (e.type === "summaryError") { summaryLoading = false; summaryTimeout.stop(); if (e.text) toast(e.text) }
         else if (e.type === "summarizeSetup") { summaryLoading = false; summaryTimeout.stop(); summarizeClis = e.clis || []; summarizeSetupNeeded() }
@@ -1926,8 +1925,10 @@ Item {
     // in-scope messages and run them through the user-configured provider. The
     // result arrives async as a "summary" event (or an error toast).
     property string summaryText: ""
+    property string summaryCoverage: ""
     property string lastSummaryText: ""      // most recent summary this session — ⇧C reopens it
     property string lastSummaryChannel: ""   // its channel name, for the modal subtitle
+    property string lastSummaryCoverage: ""
     property string lastSummaryScope: ""     // the range that produced it, for follow-ups
     property string lastSummaryUser: ""
     property string aiScope: ""              // range of the in-flight summarize/ask; follow-ups reuse it
@@ -1953,6 +1954,14 @@ Item {
         summaryLoading = true   // drives the button spinner + the badge above the composer
         summaryTimeout.restart()
         safeWrite(JSON.stringify({ type: "summarize", channel: currentChannelId, scope: scope, user: user || "" }) + "\n")
+    }
+    function summarizeTopic(topic) {
+        if (!currentChannelId || summaryLoading || !topic.trim().length) return
+        aiScope = "last_week"; aiUser = ""
+        aiBusyLabel = "Summarizing “" + topic + "”…"
+        summaryLoading = true
+        summaryTimeout.restart()
+        safeWrite(JSON.stringify({ type: "summarize", channel: currentChannelId, scope: "last_week", topic: topic.trim() }) + "\n")
     }
     // Ask a free-text question about the chosen scope's messages (Discord agent menu).
     function ask(scope, user, question) {

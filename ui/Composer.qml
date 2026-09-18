@@ -215,7 +215,7 @@ Rectangle {
     }
 
     // summarize-while-away button, left of send — Discord only (the daemon verb
-    // exists only in dsqrd). Opens the scope picker; spins while summarizing.
+    // exists only in dsqrd). Opens the scope picker; its pinecone animates while summarizing.
     Rectangle {
         id: sumBtn
         visible: Backend.railHidden
@@ -224,13 +224,11 @@ Rectangle {
         width: 32; height: 32; radius: Theme.radiusSm
         color: (Backend.summaryLoading || hovSum.hovered) ? Theme.hover : Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.06)
         Behavior on color { ColorAnimation { duration: 120 } }
-        Icon { name: "sparkle-3"; width: 15; height: 15; anchors.centerIn: parent
-               color: root.inkMuted; visible: !Backend.summaryLoading }
-        Spinner {
-            anchors.centerIn: parent
-            visible: Backend.summaryLoading
+        PineconeIcon {
+            width: 21; height: 21; anchors.centerIn: parent
+            color: root.inkMuted
+            activeColor: Theme.mode === "dark" ? Theme.orange : Theme.electric
             running: Backend.summaryLoading
-            color: Theme.electric
         }
         HoverHandler { id: hovSum }
         TapHandler { enabled: !Backend.summaryLoading; onTapped: root.openSummarize() }

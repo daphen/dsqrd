@@ -156,7 +156,9 @@ SUMMARIZE_SYS = (
     "What matters most, in order: anything that needs the reader (a question put to "
     "them, something asked of them, a deadline), then decisions reached, then what was "
     "merely discussed. Lead with the first kind wherever it exists — a recap that "
-    "buries \"you were asked X\" under small talk has failed.\n"
+    "buries \"you were asked X\" under small talk has failed. Any line marked "
+    "`[MENTIONS YOU — HIGH PRIORITY]` directly tags the reader: always preserve and "
+    "surface it, even when a requested topic would otherwise exclude it.\n"
     "\n"
     "Output GitHub-flavored markdown in this exact shape — the app parses it, so do "
     "not deviate:\n"
@@ -212,7 +214,7 @@ ANSWER_SYS = (
 # do_summarize/do_ask know the scope; without it the recap can't say what it covered.
 SPAN_LABELS = {
     "session": "the current burst of conversation, since the last long silence",
-    "all_new": "everything posted since the reader last read this channel",
+    "all_new": "everything posted since the reader last left this channel (or their Discord read marker if no visit was recorded yet)",
     "last_day": "the last 24 hours",
     "last_week": "the last week",
     "user": "one person's messages from the current conversation",
@@ -274,18 +276,25 @@ def emoji_url(emoji_id, animated=False):
 
 EMOJI_JSON = os.path.join(_data_dir(), "emoji-dsqrd.json")
 PREFS_JSON = os.path.join(_data_dir(), "prefs-dsqrd.json")
+VISIT_MARKERS_JSON = os.path.join(_data_dir(), "visit-markers.json")
+SUMMARY_CHUNK_CHARS = 12000
+SUMMARY_NOTE_CHARS = 5000
+
+
+def _load_json_dict(path):
+    try:
+        with open(path) as f:
+            value = json.load(f)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
 
 
 def _load_prefs():
     """UI preferences persisted across restarts (sidebar collapsed, recent
     channels, last-active channel). Frequent update-restarts otherwise reset
     them every time. Best-effort: a missing/corrupt file just yields {}."""
-    try:
-        with open(PREFS_JSON) as f:
-            p = json.load(f)
-            return p if isinstance(p, dict) else {}
-    except Exception:
-        return {}
+    return _load_json_dict(PREFS_JSON)
 
 
 IMG_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".apng")
@@ -947,6 +956,10 @@ class DQS:
         self._last_update_check = 0.0
         self.prefs = _load_prefs()   # persisted UI prefs, replayed on bootstrap
         self._prefs_lock = threading.Lock()
+        self._visit_markers = _load_json_dict(VISIT_MARKERS_JSON)
+        self._visit_cutoffs = {}
+        self._latest_messages = {}
+        self._visit_lock = threading.Lock()
 
     def _save_prefs(self):
         with self._prefs_lock:
@@ -957,6 +970,56 @@ class DQS:
                 os.replace(tmp, PREFS_JSON)
             except Exception:
                 pass
+
+    def _discord_read_marker(self, channel):
+        try:
+            state = (self.gateway.get_read_state() or {}).get(str(channel)) or {}
+            return int(state.get("last_acked_message_id") or 0)
+        except (TypeError, ValueError, AttributeError):
+            return 0
+
+    def _enter_visit(self, channel):
+        if not channel:
+            return
+        channel = str(channel)
+        with self._visit_lock:
+            try:
+                cutoff = int(self._visit_markers.get(channel) or 0)
+            except (TypeError, ValueError):
+                cutoff = 0
+            self._visit_cutoffs[channel] = cutoff or self._discord_read_marker(channel)
+
+    def _leave_visit(self, channel):
+        if not channel:
+            return
+        channel = str(channel)
+        with self._visit_lock:
+            try:
+                latest = int(self._latest_messages.get(channel) or 0)
+                previous = int(self._visit_markers.get(channel) or 0)
+            except (TypeError, ValueError):
+                return
+            if not latest or latest <= previous:
+                return
+            updated = dict(self._visit_markers)
+            updated[channel] = str(latest)
+            try:
+                tmp = VISIT_MARKERS_JSON + ".tmp"
+                with open(tmp, "w") as f:
+                    json.dump(updated, f, sort_keys=True)
+                os.replace(tmp, VISIT_MARKERS_JSON)
+            except OSError:
+                return
+            self._visit_markers = updated
+
+    def _note_latest(self, channel, message_id):
+        try:
+            message_id = int(message_id or 0)
+        except (TypeError, ValueError):
+            return
+        channel = str(channel)
+        with self._visit_lock:
+            self._latest_messages[channel] = max(message_id, int(self._latest_messages.get(channel) or 0))
 
     def _set_auth(self, state, **fields):
         self.auth_status = {"type": "auth", "state": state, **fields}
@@ -1245,6 +1308,8 @@ class DQS:
         except Exception:
             pass
         msgs = self.discord.get_messages(channel_id, num=50) or []
+        if msgs:
+            self._note_latest(channel_id, msgs[0].get("id"))
         for m in msgs:
             self.learn_participant(channel_id, m)
         out = [map_msg(m) for m in msgs]
@@ -1387,6 +1452,10 @@ class DQS:
         # today's date so "next month" in a message resolves to a real month
         sysp += ("\n\nThis transcript is " + span_label(scope)
                  + ". Today is " + datetime.now().astimezone().strftime("%A %-d %B %Y") + ".")
+        if cfg.get("_summary_topic"):
+            sysp += ("\nSummarize only material relevant to this topic: "
+                     + str(cfg["_summary_topic"])
+                     + ". Omit unrelated discussion except lines marked `[MENTIONS YOU — HIGH PRIORITY]`, which must always be included.")
         prov = (cfg.get("provider") or "").lower()
         if prov == "pi-cli":
             return self._pi_cli(cfg, sysp, transcript)
@@ -1439,8 +1508,6 @@ class DQS:
         return (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
 
     def _summ_line_text(self, m):
-        # Resolve Discord tokens to plain text for the transcript, so the model
-        # sees "@name" / ":emoji:" instead of raw <@id> / <:emoji:id> snowflakes.
         content = m.get("content") or ""
         names = {}
         for u in (m.get("mentions") or []):
@@ -1453,7 +1520,22 @@ class DQS:
         content = re.sub(r"<#(\d+)>", "#channel", content)
         content = re.sub(r"<@&\d+>", "@role", content)
         content = re.sub(r"<a?:([A-Za-z0-9_]+):\d+>", r":\1:", content)
-        return content.strip()
+        parts = [content.strip()] if content.strip() else []
+        for item in (m.get("embeds") or []):
+            name = item.get("name")
+            if not name:
+                continue
+            kind = str(item.get("type") or "file").split("/", 1)[0]
+            if kind == "audio" and item.get("duration_secs") is not None:
+                parts.append(f"[voice message: {name}, {round(float(item['duration_secs']))}s]")
+            else:
+                parts.append(f"[{kind}: {name}]")
+        for sticker in (m.get("stickers") or []):
+            parts.append("[sticker: " + (sticker.get("name") or "unnamed") + "]")
+        text = " ".join(parts).strip()
+        my_id = str(getattr(self, "my_id", "") or "")
+        tagged = my_id and any(str(u.get("id") or "") == my_id for u in (m.get("mentions") or []))
+        return ("[MENTIONS YOU — HIGH PRIORITY] " + text) if tagged and text else text
 
     def _session_start(self, raw, gap_secs, anchor_idx=None):
         """raw is oldest→newest. Returns the snowflake id of the first message of
@@ -1482,91 +1564,178 @@ class DQS:
         except Exception:
             return 0
 
-    def _gather_lines(self, channel, scope, user, cfg):
-        """Page the channel's recent history (no local cache → live fetch,
-        bounded), filter to the requested scope, and return oldest→newest
-        transcript lines. Shared by summarize and ask so both honor the same
-        ranges: session / all_new / last_day / last_week / a person."""
-        # scope → a cutoff snowflake; keep messages with id greater than it.
+    def _gather_lines(self, channel, scope, user, cfg, use_visit=False):
+        """Fetch every in-scope message, optionally stopping at the previous visit."""
         cutoff = 0
-        if scope == "all_new":
+        if use_visit and scope == "all_new":
+            channel = str(channel)
             try:
-                rs = (self.gateway.get_read_state() or {}).get(channel) or {}
-                cutoff = int(rs.get("last_acked_message_id") or 0)
-            except Exception:
+                cutoff = int(self._visit_cutoffs.get(channel) or self._visit_markers.get(channel) or 0)
+            except (TypeError, ValueError):
                 cutoff = 0
-        elif scope in ("last_day", "last_week"):
+            if not cutoff:
+                cutoff = self._discord_read_marker(channel)
+        if scope in ("last_day", "last_week"):
             secs = 86400 if scope == "last_day" else 604800
-            unix_ms = int((time.time() - secs) * 1000)
-            cutoff = (unix_ms - DISCORD_EPOCH) << 22
-        CAP = 300
+            time_cutoff = (int((time.time() - secs) * 1000) - DISCORD_EPOCH) << 22
+            cutoff = max(cutoff, time_cutoff)
+
         raw, before = [], None
-        while len(raw) < CAP:
+        gap = int(cfg.get("session_gap") or 3600)
+        while True:
             page = self.discord.get_messages(channel, num=100, before=before) or []
             if not page:
                 break
-            raw.extend(page)
-            before = page[-1].get("id")   # newest-first → last entry is oldest
-            if len(page) < 100:
+            reached = False
+            for message in page:
+                try:
+                    mid = int(message.get("id") or 0)
+                except (TypeError, ValueError):
+                    mid = 0
+                if cutoff and mid <= cutoff:
+                    reached = True
+                    continue
+                raw.append(message)
+            if reached or len(page) < 100:
                 break
-        raw.reverse()   # oldest-first for the transcript
-        # "What's new" (session) and "from a person" are bounded to the current
-        # conversation session — the latest burst since a silence gap.
-        gap = int(cfg.get("session_gap") or 3600)
+            before = page[-1].get("id")
+            chronological = list(reversed(raw))
+            anchor = None
+            if scope == "user":
+                for i, message in enumerate(chronological):
+                    if str(message.get("user_id")) == str(user):
+                        anchor = i
+            needs_session_boundary = scope == "session" or (scope == "user" and anchor is not None)
+            if needs_session_boundary:
+                start = self._session_start(chronological, gap, anchor)
+                try:
+                    oldest = int(chronological[0].get("id") or 0)
+                except (TypeError, ValueError, IndexError):
+                    oldest = 0
+                if start and start > oldest:
+                    break
+
+        raw.reverse()
         session_start = 0
         if scope == "session":
-            session_start = self._session_start(raw, gap)   # channel's current session
+            session_start = self._session_start(raw, gap)
         elif scope == "user":
-            last_idx = -1                                    # the person's last message…
-            for i in range(len(raw)):
-                if str(raw[i].get("user_id")) == str(user):
+            last_idx = -1
+            for i, message in enumerate(raw):
+                if str(message.get("user_id")) == str(user):
                     last_idx = i
-            if last_idx >= 0:                                # …and the session it sits in
+            if last_idx >= 0:
                 session_start = self._session_start(raw, gap, last_idx)
 
-        def keep(m):
+        kept = []
+        for message in raw:
             try:
-                mid = int(m.get("id") or 0)
-            except Exception:
+                mid = int(message.get("id") or 0)
+            except (TypeError, ValueError):
                 mid = 0
-            if scope == "user":
-                if str(m.get("user_id")) != str(user):
-                    return False
-                return session_start == 0 or mid >= session_start
-            if scope == "session":
-                return session_start == 0 or mid >= session_start
-            if cutoff:
-                return mid > cutoff
-            return True
-
-        kept = [m for m in raw if keep(m) and self._summ_line_text(m)]
-        # Stamp the DAY too once the span crosses midnight — a week of [HH:MM] with no
-        # date is why recaps say "next month" instead of naming the day something was
-        # agreed. Same-day spans stay on the bare clock.
+            if scope == "user" and str(message.get("user_id")) != str(user):
+                continue
+            if scope in ("session", "user") and session_start and mid < session_start:
+                continue
+            if self._summ_line_text(message):
+                kept.append(message)
         with_date = len({local_day(m.get("timestamp")) for m in kept}) > 1
         lines = []
-        for m in kept:
-            name = m.get("nick") or m.get("global_name") or m.get("username") or "someone"
-            lines.append(f"[{stamp(m.get('timestamp'), with_date)}] {name}: {self._summ_line_text(m)}")
-        return lines[-CAP:]
+        for message in kept:
+            name = message.get("nick") or message.get("global_name") or message.get("username") or "someone"
+            lines.append(f"[{stamp(message.get('timestamp'), with_date)}] {name}: {self._summ_line_text(message)}")
+        return {
+            "lines": lines,
+            "count": len(kept),
+            "start": kept[0].get("timestamp") if kept else "",
+            "end": kept[-1].get("timestamp") if kept else "",
+            "cursor": kept[-1].get("id") if kept else "",
+        }
 
-    def do_summarize(self, channel, scope, user):
-        """Summarize the channel's in-scope messages via the user-configured
-        provider. Result broadcasts as a "summary" event; failures toast."""
+    def _bounded_chunks(self, parts, limit=SUMMARY_CHUNK_CHARS):
+        chunks, current = [], ""
+        for part in parts:
+            rest = str(part)
+            while rest:
+                room = limit - len(current) - (1 if current else 0)
+                if room <= 0:
+                    chunks.append(current)
+                    current = ""
+                    continue
+                piece, rest = rest[:room], rest[room:]
+                current += ("\n" if current else "") + piece
+                if len(current) >= limit:
+                    chunks.append(current)
+                    current = ""
+        if current:
+            chunks.append(current)
+        return chunks
+
+    def _summarize_transcript(self, cfg, lines, scope, topic=""):
+        final_cfg = dict(cfg)
+        if topic:
+            final_cfg["_summary_topic"] = topic
+        chunks = self._bounded_chunks(lines)
+        if len(chunks) == 1:
+            return self._llm_summarize(final_cfg, chunks[0], scope)
+        topic_note = (f' Keep only material relevant to the topic "{topic}".' if topic else "")
+        mention_note = " Always preserve lines marked [MENTIONS YOU — HIGH PRIORITY], regardless of topic."
+        note_prompt = (
+            "Condense this transcript chunk into factual notes for a later final recap."
+            + topic_note
+            + mention_note
+            + " Preserve names, requests, decisions, dates, times, numbers, links, and attachment descriptions. "
+            "Do not add facts or preamble."
+        )
+        notes = []
+        for i, chunk in enumerate(chunks):
+            self.broadcast({"type": "summaryProgress", "done": i, "total": len(chunks)})
+            note = self._llm_call(cfg, note_prompt, chunk).strip()
+            if not note:
+                raise RuntimeError("empty chunk summary from provider")
+            notes.append(note[:SUMMARY_NOTE_CHARS])
+        while len(self._bounded_chunks(notes)) > 1:
+            groups = self._bounded_chunks(notes)
+            notes = []
+            for i, group in enumerate(groups):
+                self.broadcast({"type": "summaryProgress", "done": i, "total": len(groups)})
+                note = self._llm_call(cfg, note_prompt, group).strip()
+                if not note:
+                    raise RuntimeError("empty synthesis response from provider")
+                notes.append(note[:SUMMARY_NOTE_CHARS])
+        return self._llm_summarize(final_cfg, "Partial summaries:\n\n" + notes[0], scope)
+
+    def _coverage_text(self, count, start, end):
+        def display(value):
+            try:
+                return datetime.fromisoformat(value).astimezone().strftime("%-d %b %Y, %H:%M")
+            except Exception:
+                return value or "unknown time"
+        noun = "message" if count == 1 else "messages"
+        first, last = display(start), display(end)
+        return f"{count} {noun} · {first}" + (("–" + last) if last != first else "")
+
+    def do_summarize(self, channel, scope, user, topic=""):
         cfg = self._summarize_cfg()
         if not (cfg.get("provider") or cfg.get("base_url")):
             self.broadcast({"type": "summarizeSetup", "clis": self._available_clis()})
             return
         try:
-            lines = self._gather_lines(channel, scope, user, cfg)
-            if not lines:
+            gathered = self._gather_lines(channel, scope, user, cfg, use_visit=True)
+            if not gathered["lines"]:
                 self.broadcast({"type": "summaryError", "text": "Nothing to summarize in that range"})
                 return
-            summary = self._llm_summarize(cfg, "\n".join(lines), scope)
+            summary = self._summarize_transcript(cfg, gathered["lines"], scope, topic)
             if not summary:
                 self.broadcast({"type": "summaryError", "text": "Summarize: empty response from provider"})
                 return
-            self.broadcast({"type": "summary", "text": summary})
+            self.broadcast({
+                "type": "summary", "text": summary,
+                "channel": channel, "channelName": self.chan_name.get(channel, ""),
+                "coverage": self._coverage_text(gathered["count"], gathered["start"], gathered["end"]),
+                "coverageCount": gathered["count"], "coverageStart": gathered["start"], "coverageEnd": gathered["end"],
+                "topic": topic,
+            })
         except Exception as e:
             print(f"dsqrd: summarize EXC {e!r}", flush=True)
             self.broadcast({"type": "summaryError", "text": f"Summarize failed: {e}"})
@@ -1582,13 +1751,13 @@ class DQS:
             self.broadcast({"type": "summarizeSetup", "clis": self._available_clis()})
             return
         try:
-            lines = self._gather_lines(channel, scope, user, cfg)
-            if not lines:
+            gathered = self._gather_lines(channel, scope, user, cfg)
+            if not gathered["lines"]:
                 self.broadcast({"type": "summaryError", "text": "No conversation in that range"})
                 return
             answer = self._llm_call(cfg, ANSWER_SYS + "\n\nThis transcript is " + span_label(scope)
                                     + ". Today is " + datetime.now().astimezone().strftime("%A %-d %B %Y") + ".",
-                                    "Question: " + question + "\n\nConversation transcript:\n" + "\n".join(lines))
+                                    "Question: " + question + "\n\nConversation transcript:\n" + "\n".join(gathered["lines"]))
             if not answer:
                 self.broadcast({"type": "summaryError", "text": "Ask: empty response from provider"})
                 return
@@ -2295,6 +2464,7 @@ class DQS:
             ws = m.get("guild_id") or DM_WS
             self.chan_guild[cid] = ws
         if op in ("MESSAGE_CREATE", "MESSAGE_CREATE_QUICK", "MESSAGE_UPDATE"):
+            self._note_latest(cid, m.get("id"))
             if self.learn_participant(cid, m) and cid == self.active_ch:
                 self.broadcast({"type": "users", "users": self.users_payload(cid)})
             mm = map_msg(m)
@@ -2466,17 +2636,32 @@ class DQS:
                     continue
                 if not self.signed_in:
                     continue
-                if t in ("recent", "focus"):
-                    self.active_ch = ch or None
+                if t == "recent":
+                    next_ch = ch or None
+                    if next_ch != self.active_ch:
+                        if self.app_active:
+                            self._leave_visit(self.active_ch)
+                        self.active_ch = next_ch
+                        if self.app_active:
+                            self._enter_visit(self.active_ch)
                 if t == "focus":
-                    self.app_active = cmd.get("active") is True
+                    next_ch = ch or None
+                    next_active = cmd.get("active") is True
+                    if self.app_active and (not next_active or next_ch != self.active_ch):
+                        self._leave_visit(self.active_ch)
+                    if next_active and (not self.app_active or next_ch != self.active_ch):
+                        self._enter_visit(next_ch)
+                    self.active_ch = next_ch
+                    self.app_active = next_active
                     self.focus_conn = conn if self.app_active else None
                 if t == "recent":
                     threading.Thread(target=self.send_recent, args=(conn, ch), daemon=True).start()
                 elif t == "history":
                     threading.Thread(target=self.send_history, args=(conn, ch, cmd.get("before")), daemon=True).start()
                 elif t == "summarize" and ch:
-                    threading.Thread(target=self.do_summarize, args=(ch, cmd.get("scope"), cmd.get("user")), daemon=True).start()
+                    threading.Thread(target=self.do_summarize,
+                                     args=(ch, cmd.get("scope"), cmd.get("user"), cmd.get("topic") or ""),
+                                     daemon=True).start()
                 elif t == "ask" and ch:
                     threading.Thread(target=self.do_ask, args=(ch, cmd.get("scope"), cmd.get("user"), cmd.get("question")), daemon=True).start()
                 elif t == "summarizeEnable":
@@ -2604,6 +2789,7 @@ class DQS:
                                      args=(conn, str(cmd["user"]), cmd.get("workspace", "")), daemon=True).start()
                 # focus is handled above for notification suppression
         if self.focus_conn is conn:
+            self._leave_visit(self.active_ch)
             self.app_active = False
             self.focus_conn = None
         self.drop(conn)

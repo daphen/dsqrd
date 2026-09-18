@@ -309,7 +309,7 @@ FloatingWindow {
                           help: () => win.isDiscord ? "Toggle sidebar" : "Browse channels", cat: "chats" },
             "s":        { act: () => sidebar.toggleStarCurrent(), help: "Star / unstar channel", cat: "chats" },
             "c":        { act: () => { if (win.isDiscord) summarizePicker.start() }, help: () => win.isDiscord ? "Agent — summarize or ask" : "", cat: "chats" },
-            "C":        { act: () => { if (win.isDiscord && Backend.lastSummaryText.length) { Backend.aiScope = Backend.lastSummaryScope; Backend.aiUser = Backend.lastSummaryUser; summaryModal.showWith(Backend.lastSummaryText, Backend.lastSummaryChannel) } },
+            "C":        { act: () => { if (win.isDiscord && Backend.lastSummaryText.length) { Backend.aiScope = Backend.lastSummaryScope; Backend.aiUser = Backend.lastSummaryUser; summaryModal.showWith(Backend.lastSummaryText, Backend.lastSummaryChannel, Backend.lastSummaryCoverage) } },
                           help: () => (win.isDiscord && Backend.lastSummaryText.length) ? "Open last summary" : "", cat: "chats" },
             "u":        { act: () => win.openUpload(), help: "Attach a file", cat: "chats" },
             // slqs only (Discord has no equivalent): d = DM anyone, I = invite to channel.
@@ -731,7 +731,7 @@ FloatingWindow {
                         Row {
                             id: sbRow; anchors.centerIn: parent; spacing: 8
                             Rectangle {
-                                width: 8; height: 8; radius: 4; color: Theme.electric
+                                width: 8; height: 8; radius: 4; color: Theme.orange
                                 anchors.verticalCenter: parent.verticalCenter
                                 SequentialAnimation on opacity {
                                     running: Backend.summaryLoading; loops: Animation.Infinite
@@ -1027,6 +1027,7 @@ FloatingWindow {
                 id: summarizePicker
                 z: 105
                 onChosen: (scope, user) => Backend.summarize(scope, user)
+                onTopicChosen: topic => Backend.summarizeTopic(topic)
                 onAsked: (scope, user, question) => Backend.ask(scope, user, question)
                 onOpenChanged: if (!open) win.backToNormal()
             }
@@ -1037,7 +1038,7 @@ FloatingWindow {
                 onOpenChanged: if (!open) win.backToNormal()
                 Connections {
                     target: Backend
-                    function onSummaryReady() { summaryModal.showWith(Backend.summaryText, Backend.currentChannel) }
+                    function onSummaryReady() { summaryModal.showWith(Backend.summaryText, Backend.lastSummaryChannel, Backend.summaryCoverage) }
                     function onAnswerReady(question) { summaryModal.showAnswer(Backend.summaryText, question) }
                 }
             }
