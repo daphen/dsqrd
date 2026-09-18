@@ -280,6 +280,7 @@ PREFS_JSON = os.path.join(_data_dir(), "prefs-dsqrd.json")
 PARTICIPATION_MARKERS_JSON = os.path.join(_data_dir(), "participation-markers.json")
 SUMMARY_CHUNK_CHARS = 12000
 SUMMARY_NOTE_CHARS = 5000
+SUMMARY_RECENT_SPEAK_GRACE_MS = 2 * 60 * 1000
 
 
 def _load_json_dict(path):
@@ -972,6 +973,13 @@ class DQS:
             except Exception:
                 pass
 
+    def _eligible_participation_cutoff(self, message_id):
+        try:
+            sent_ms = (int(message_id) >> 22) + DISCORD_EPOCH
+        except (TypeError, ValueError):
+            return False
+        return sent_ms <= int(time.time() * 1000) - SUMMARY_RECENT_SPEAK_GRACE_MS
+
     def _enter_visit(self, channel):
         if not channel:
             return
@@ -981,17 +989,19 @@ class DQS:
                 cutoff = int(self._visit_markers.get(channel) or 0)
             except (TypeError, ValueError):
                 cutoff = 0
-            self._visit_cutoffs[channel] = cutoff
+            self._visit_cutoffs[channel] = cutoff if self._eligible_participation_cutoff(cutoff) else 0
 
     def _seed_participation_cutoff(self, channel, messages):
         channel = str(channel)
         with self._visit_lock:
-            if self._visit_cutoffs.get(channel) or self._visit_markers.get(channel):
+            if self._visit_cutoffs.get(channel):
                 return
             for message in messages:
-                if str(message.get("user_id") or "") == str(self.my_id):
+                message_id = message.get("id")
+                if (str(message.get("user_id") or "") == str(self.my_id)
+                        and self._eligible_participation_cutoff(message_id)):
                     try:
-                        self._visit_cutoffs[channel] = int(message.get("id") or 0)
+                        self._visit_cutoffs[channel] = int(message_id or 0)
                     except (TypeError, ValueError):
                         pass
                     return
@@ -1580,7 +1590,7 @@ class DQS:
         if use_visit and scope == "all_new":
             channel = str(channel)
             try:
-                cutoff = int(self._visit_cutoffs.get(channel) or self._visit_markers.get(channel) or 0)
+                cutoff = int(self._visit_cutoffs.get(channel) or 0)
             except (TypeError, ValueError):
                 cutoff = 0
         if scope in ("last_day", "last_week"):

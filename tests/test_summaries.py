@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import unittest
 from typing import Any
 from unittest import mock
@@ -96,15 +97,19 @@ class SummaryBehaviorTest(unittest.TestCase):
         self.assertEqual(persisted["channel"], "140")
         self.assertEqual(app._visit_cutoffs["channel"], 140)
 
-    def test_first_visit_uses_latest_own_message_before_current_sends(self):
-        app = app_with([])
+    def test_first_visit_ignores_own_messages_from_the_last_two_minutes(self):
+        now_ms = int(time.time() * 1000)
+        recent = ((now_ms - 30_000 - daemon.DISCORD_EPOCH) << 22)
+        previous = ((now_ms - 180_000 - daemon.DISCORD_EPOCH) << 22)
+        app = app_with([], {"channel": str(recent)})
         app._enter_visit("channel")
+        self.assertEqual(app._visit_cutoffs["channel"], 0)
         app._seed_participation_cutoff("channel", [
-            message(100, user_id="someone-else"),
-            message(90, user_id="reader"),
-            message(80, user_id="reader"),
+            message(recent, user_id="reader", content="I'm back"),
+            message(recent - 1, user_id="someone-else"),
+            message(previous, user_id="reader"),
         ])
-        self.assertEqual(app._visit_cutoffs["channel"], 90)
+        self.assertEqual(app._visit_cutoffs["channel"], previous)
 
     def test_failed_summary_does_not_change_participation_boundary(self):
         app = app_with([message(101)], {"channel": "100"})
