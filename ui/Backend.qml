@@ -1415,10 +1415,14 @@ Item {
         }
     }
 
-    // Tell slkd what channel we're viewing so it suppresses notifications for
-    // it while the window is focused (slkd tracks focus via niri's event stream).
+    // Tell the daemon exactly what the UI is showing and whether this app owns
+    // keyboard focus, so only messages already visible to the user stay silent.
     function sendFocus() {
-        safeWrite(JSON.stringify({ type: "focus", channel: (threadsView || mentionsView) ? "" : currentChannelId }) + "\n")
+        safeWrite(JSON.stringify({
+            type: "focus",
+            channel: (threadsView || mentionsView) ? "" : currentChannelId,
+            active: Qt.application.state === Qt.ApplicationActive
+        }) + "\n")
     }
 
     // Open a focused message's first image in the custom media viewer (same

@@ -14,7 +14,6 @@ import array
 import atexit
 import base64
 import faulthandler
-import glob
 import hashlib
 import html as _html
 import json
@@ -923,7 +922,8 @@ class DQS:
         self.emoji_by_name = {}   # custom emoji name -> (id, animated) for react/send resolution
         self.codemap = _load_codemap()   # standard shortcode name -> unicode glyph (for reactions)
         self.notifier = None      # dbus notifier (clickable → open channel)
-        self.app_active = False   # is our client window currently focused?
+        self.app_active = False   # focus state reported by the connected UI
+        self.focus_conn = None    # connection owning that focus claim
         self.user_names = {}      # user id -> display name (for DM typing indicators)
         self.pending_attach = {}  # channel id -> uploaded attachment, sent with next message
         self.uploading = {}       # channel id -> Event set when an in-flight upload finishes
@@ -2433,29 +2433,6 @@ class DQS:
                    or self.chan_name.get(cid) or "someone")
             self.broadcast({"type": "typing", "channel": cid, "user": who})
 
-    def watch_focus(self):
-        """Track whether our client window is focused (suppress its notifications
-        only then). Polls niri's focused window title."""
-        while True:
-            try:
-                env = os.environ.copy()
-                niri_socket = env.get("NIRI_SOCKET")
-                if not niri_socket or not os.path.exists(niri_socket):
-                    sockets = glob.glob(os.path.join(
-                        env.get("XDG_RUNTIME_DIR", "/tmp"),
-                        f"niri.{glob.escape(env['WAYLAND_DISPLAY'])}.*.sock"))
-                    niri_socket = max(sockets, key=os.path.getmtime)
-                    env["NIRI_SOCKET"] = niri_socket
-                out = subprocess.run(["niri", "msg", "--json", "focused-window"],
-                                     capture_output=True, text=True, timeout=3,
-                                     env=env).stdout
-                w = json.loads(out) if out.strip() else None
-                active = bool(w) and (w.get("title") == "dsqrd")
-            except Exception:
-                active = False
-            self.app_active = active   # used to suppress notifications for the open channel
-            time.sleep(1)
-
     def heartbeat(self):
         while True:
             time.sleep(3)
@@ -2491,6 +2468,9 @@ class DQS:
                     continue
                 if t in ("recent", "focus"):
                     self.active_ch = ch or None
+                if t == "focus":
+                    self.app_active = cmd.get("active") is True
+                    self.focus_conn = conn if self.app_active else None
                 if t == "recent":
                     threading.Thread(target=self.send_recent, args=(conn, ch), daemon=True).start()
                 elif t == "history":
@@ -2622,7 +2602,10 @@ class DQS:
                 elif t == "profile" and cmd.get("user"):
                     threading.Thread(target=self.do_profile,
                                      args=(conn, str(cmd["user"]), cmd.get("workspace", "")), daemon=True).start()
-                # focus is a no-op (tracked above for notification suppression)
+                # focus is handled above for notification suppression
+        if self.focus_conn is conn:
+            self.app_active = False
+            self.focus_conn = None
         self.drop(conn)
 
     def serve(self):
@@ -2789,7 +2772,6 @@ class DQS:
         threading.Thread(target=self.drain_gateway, daemon=True).start()
         threading.Thread(target=self.drain_typing, daemon=True).start()
         threading.Thread(target=self.drain_presence, daemon=True).start()
-        threading.Thread(target=self.watch_focus, daemon=True).start()
         threading.Thread(target=self.watch_wake, daemon=True).start()
         threading.Thread(target=self.heartbeat, daemon=True).start()
         threading.Thread(target=self.check_updates, daemon=True).start()

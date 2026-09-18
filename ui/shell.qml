@@ -38,8 +38,10 @@ FloatingWindow {
     // Discord instances apart (both share the org.quickshell app-id).
     title: (Quickshell.env("SLK_SOCK") === "dsqrd") ? "dsqrd" : "slqs"
 
-    // Window-focus tracking for notification suppression lives in slkd, which
-    // watches niri's event stream (FloatingWindow exposes no focus property).
+    Connections {
+        target: Qt.application
+        function onStateChanged() { Backend.sendFocus() }
+    }
 
     // ── vim modal state ──────────────────────────────────────────────────
     // The mirror of slk's internal/ui: a key router + panel focus. "Insert"
