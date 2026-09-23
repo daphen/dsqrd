@@ -828,7 +828,7 @@ FloatingWindow {
                     Rectangle {
                         width: modeLabel.implicitWidth + 16; height: 22; radius: 7
                         anchors.verticalCenter: parent.verticalCenter
-                        color: win.insertMode ? Theme.cursor : Theme.green
+                        color: win.insertMode ? "#315C49" : Theme.green
                         Text { 
                             id: modeLabel; anchors.centerIn: parent
                             text: win.insertMode ? "INSERT" : "NORMAL"

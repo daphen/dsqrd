@@ -3,6 +3,7 @@ singleton Theme Theme.qml
 singleton Html Html.qml
 singleton Motion Motion.qml
 Icon Icon.qml
+PrimaryButton PrimaryButton.qml
 KeyCap KeyCap.qml
 CapLabel CapLabel.qml
 FeedbackPill FeedbackPill.qml
