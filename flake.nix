@@ -50,8 +50,6 @@
           export SLK_MEDIA_VIEWER="''${SLK_MEDIA_VIEWER:-${daemon}/share/dsqrd/media-viewer.sh}"
           sock="$XDG_RUNTIME_DIR/dsqrd.sock"
 
-          # a UI is already up (window stays mapped in this app — jump-or-exec
-          # handles focus): a second one is never wanted
           # serialize the daemon aliveness check + spawn: concurrent launches
           # used to each see "no daemon" and spawn duplicates
           exec 9>"$XDG_RUNTIME_DIR/dsqrd-launch.lock"
@@ -75,14 +73,9 @@
           fi
           for _ in $(seq 1 300); do [ -S "$sock" ] && break; sleep 0.1; done
 
-          # single-instance UI — checked AFTER the daemon health pass, so the
-          # launcher can revive a dead daemon while a window is still up
-          if pgrep -f "quickshell.* -p .*share/dsqrd/ui" >/dev/null 2>&1; then
-            exit 0
-          fi
-          # close the launch lock for qs — an inherited fd 9 holds the lock
-          # for the UI's whole lifetime and deadlocks future launches
-          exec qs -p "${daemon}/share/dsqrd/ui" 9>&-
+          # Let Quickshell key single-instance detection to this exact config;
+          # a windowless process from an older Nix store path must not block it.
+          exec qs --no-duplicate -p "${daemon}/share/dsqrd/ui" 9>&-
         '';
       };
     in {
