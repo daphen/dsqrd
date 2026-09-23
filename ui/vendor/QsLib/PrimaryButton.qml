@@ -24,6 +24,7 @@ Item {
     implicitWidth: Math.max(36, label.implicitWidth + (icon.visible ? icon.width + 18 : 0) + 48)
     implicitHeight: 38
     opacity: enabled ? 1 : 0.38
+    Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.InOutQuad } }
 
     Rectangle {
         anchors.fill: parent
