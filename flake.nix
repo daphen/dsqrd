@@ -47,6 +47,7 @@
         text = ''
           export QML2_IMPORT_PATH="$HOME/.local/share/qml:${daemon}/share/dsqrd/ui/vendor''${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
           export SLK_SOCK=dsqrd
+          if [ "''${HYPR_CANVAS_PROFILE:-}" = deck ]; then export COCKPIT_DECK=1; fi
           export SLK_MEDIA_VIEWER="''${SLK_MEDIA_VIEWER:-${daemon}/share/dsqrd/media-viewer.sh}"
           sock="$XDG_RUNTIME_DIR/dsqrd.sock"
 
