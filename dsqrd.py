@@ -2861,10 +2861,12 @@ class DQS:
                 self._update_etag = r.headers.get("ETag") or self._update_etag
                 latest = r.read().decode().strip()
             if latest and latest != GIT_REV:
-                self.update_event = {"type": "updateAvailable",
-                                     "current": GIT_REV[:7], "latest": latest[:7],
-                                     "changelog": self._fetch_changelog(GIT_REV, latest)}
-                self.broadcast(self.update_event)
+                changelog = self._fetch_changelog(GIT_REV, latest)
+                if changelog is not None:
+                    self.update_event = {"type": "updateAvailable",
+                                         "current": GIT_REV[:7], "latest": latest[:7],
+                                         "changelog": changelog}
+                    self.broadcast(self.update_event)
         except urllib.error.HTTPError as e:
             if e.code != 304:   # 304 = unchanged (ETag hit); anything else: retry next cycle
                 pass
@@ -2875,12 +2877,15 @@ class DQS:
         """"What's new" entries between the running build and latest, via the
         GitHub compare API. Keeps each commit's `Changelog:` trailer lines
         (user-facing summaries); a range with none (pre-convention) falls back
-        to commit subjects. Newest-first, cap 30. Best-effort: [] on failure."""
+        to commit subjects. Newest-first, cap 30. None unless latest is a
+        descendant of the installed build."""
         try:
             api = f"https://api.github.com/repos/daphen/dsqrd/compare/{current}...{latest}"
             headers = {"User-Agent": "dsqrd", "Accept": "application/vnd.github+json"}
             with urllib.request.urlopen(urllib.request.Request(api, headers=headers), timeout=15) as r:
                 data = json.loads(r.read().decode())
+            if data.get("status") != "ahead":
+                return None
             entries, subjects = [], []
             for c in data.get("commits", []):
                 msg = (c.get("commit") or {}).get("message", "")
@@ -2897,7 +2902,7 @@ class DQS:
                 entries = subjects   # pre-convention range: fall back to subjects
             return list(reversed(entries))[:30]
         except Exception:
-            return []
+            return None
 
     def check_updates(self):
         """Tell the client when a newer build exists. Detect-only — applying is the
