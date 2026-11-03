@@ -3,24 +3,33 @@ import QtQuick.Controls
 import "."
 import QsLib
 
-Rectangle {
+// Cockpit's composer: a text pill that grows to three lines, send inside it,
+// and a corner toolbar of hover-expanding pills beneath.
+Item {
     id: root
     readonly property bool attaching: Backend.attachState !== "none"
     readonly property bool replying: replyTs !== "" || editingTs !== ""
-    readonly property bool actionsFillIdle: !attaching && !replying && input.lineCount <= 1
-    readonly property real actionSize: actionsFillIdle ? Math.max(34, height - 12) : 34
-    // Grow with the text, capped at 180px; a single line's natural implicitHeight
-    // is the minimum (no artificial floor). Matches the thread reply input.
-    implicitHeight: Math.min(180, input.implicitHeight + 26 + (((attaching && !Backend.threadOpen) || replying) ? 26 : 0))
-    radius: Math.min(height / 2, 24)
+    readonly property real chipHeight: ((attaching && !Backend.threadOpen) || replying) ? 24 : 0
+    readonly property real toolbarHeight: 34
+    readonly property real lineHeight: input.cursorRectangle.height
+    readonly property real textHeight: Math.min(Math.max(1, input.lineCount), 3) * lineHeight
+    implicitHeight: inputFill.y + inputFill.height + toolbarHeight
     readonly property bool focused: input.focus
     readonly property color inkFg: Theme.fg
     readonly property color inkMuted: Theme.fg_muted
     readonly property color activeRing: Qt.alpha(Theme.mode === "light" ? "#242424" : "#FAFAFA", 0.6)
-    color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
-    border.color: focused ? activeRing : Qt.alpha(activeRing, 0)
-    border.width: 1.5
-    Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
+    signal attachRequested()
+
+    Rectangle {
+        id: inputFill
+        anchors { left: parent.left; right: parent.right }
+        y: 4; height: root.chipHeight + root.textHeight + 30
+        radius: Math.min(height / 2, 24)
+        color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
+        border.color: root.focused ? root.activeRing : Qt.alpha(root.activeRing, 0)
+        border.width: 1.5
+        Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
+    }
 
     signal exitInsert()
     signal openPalette()   // Ctrl+K from insert mode → jump palette (drops to normal)
@@ -81,7 +90,7 @@ Rectangle {
         id: replyChip
         visible: root.replying
         anchors.left: parent.left; anchors.leftMargin: 18
-        anchors.top: parent.top; anchors.topMargin: 8
+        anchors.top: inputFill.top; anchors.topMargin: 10
         spacing: 6
         Text { anchors.verticalCenter: parent.verticalCenter
                text: root.editingTs !== "" ? "✎  Editing message"
@@ -104,7 +113,7 @@ Rectangle {
         // sit to the right of the reply chip when both are showing, else at the edge
         anchors.left: root.replying ? replyChip.right : parent.left
         anchors.leftMargin: root.replying ? 16 : 18
-        anchors.top: parent.top; anchors.topMargin: 8
+        anchors.top: inputFill.top; anchors.topMargin: 10
         spacing: 6
         Icon { name: "paperclip"; width: 13; height: 13; color: Theme.fg_secondary
                anchors.verticalCenter: parent.verticalCenter }
@@ -123,11 +132,8 @@ Rectangle {
 
     Flickable {
         id: flick
-        anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom
-                  leftMargin: 18; rightMargin: Backend.railHidden
-                      ? sendBtn.width + sumBtn.width + 20
-                      : sendBtn.width + 14
-                  topMargin: 12 + (((root.attaching && !Backend.threadOpen) || root.replying) ? 24 : 0); bottomMargin: 12 }
+        anchors { left: parent.left; right: parent.right; leftMargin: 18; rightMargin: sendBtn.width + 14 }
+        y: inputFill.y + 15 + root.chipHeight; height: root.textHeight
         contentHeight: input.implicitHeight; clip: true
         // keep the cursor in view once the text grows past the visible cap
         function ensureVisible(r) {
@@ -203,31 +209,46 @@ Rectangle {
         }
     }
 
-    // send button
     RoundAction {
         id: sendBtn
         anchors.right: parent.right; anchors.rightMargin: 6
-        anchors.bottom: parent.bottom; anchors.bottomMargin: root.actionsFillIdle ? 6 : 8
-        width: root.actionSize; height: root.actionSize
+        y: inputFill.y + inputFill.height - height - (30 + root.lineHeight - height) / 2
+        width: 38; height: 38
         iconName: "paper-plane-2"
         ready: input.text.trim().length > 0
         onClicked: if (ready) root.send()
     }
 
-    // summarize-while-away button, left of send — Discord only (the daemon verb
-    // exists only in dsqrd). Opens the scope picker; its pinecone animates while summarizing.
-    RoundAction {
-        id: sumBtn
-        visible: Backend.railHidden
-        anchors.right: sendBtn.left; anchors.rightMargin: 6
-        anchors.bottom: parent.bottom; anchors.bottomMargin: root.actionsFillIdle ? 6 : 8
-        width: root.actionSize; height: root.actionSize
-        onClicked: if (!Backend.summaryLoading) root.openSummarize()
-        PineconeIcon {
-            width: 21; height: 21; anchors.centerIn: parent
-            color: sumBtn.contentColor
-            activeColor: Theme.mode === "dark" ? Theme.orange : Theme.electric
-            running: Backend.summaryLoading
+    Row {
+        anchors { left: parent.left; leftMargin: -4; bottom: parent.bottom; bottomMargin: 2 }
+        spacing: 2
+        ToolbarPill {
+            anchors.verticalCenter: parent.verticalCenter
+            iconName: "paperclip"; label: "ATTACH"
+            active: root.attaching
+            onClicked: root.attachRequested()
+        }
+        // GIF browser and summaries exist only in dsqrd (Discord).
+        ToolbarPill {
+            visible: Backend.railHidden
+            anchors.verticalCenter: parent.verticalCenter
+            iconName: "images-2"; label: "GIF"
+            onClicked: root.gifCommand("")
+        }
+        ToolbarPill {
+            id: sumPill
+            visible: Backend.railHidden
+            anchors.verticalCenter: parent.verticalCenter
+            label: "SUMMARIZE"
+            iconSize: 18
+            active: Backend.summaryLoading
+            onClicked: if (!Backend.summaryLoading) root.openSummarize()
+            PineconeIcon {
+                anchors.fill: parent
+                color: sumPill.tint
+                activeColor: Theme.mode === "dark" ? Theme.orange : Theme.electric
+                running: Backend.summaryLoading
+            }
         }
     }
 }

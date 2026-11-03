@@ -150,8 +150,8 @@ Rectangle {
 
     Rectangle {
         id: thFooter
-        anchors.bottom: parent.bottom; width: parent.width; color: "transparent"
-        bottomLeftRadius: 10   // follow the panel's rounded bottom-left corner
+        anchors.bottom: parent.bottom; anchors.bottomMargin: Theme.radiusCard
+        width: parent.width; color: "transparent"
         // Grow with the text, capped at 180px (then the Flickable scrolls). +36 is box
         // chrome; bcastH reserves the "Also send to channel" toggle row above the box.
         readonly property real bcastH: panel.editingTs === "" ? 24 : 0
@@ -160,7 +160,7 @@ Rectangle {
         readonly property real attachH: Backend.attachState !== "none" ? 22 : 0
         height: bcastH + attachH + Math.min(180, replyInput.implicitHeight + 36) + 12
 
-        Sheet { anchors.fill: parent; anchors.margins: 6 }
+        Sheet { anchors.fill: parent; anchors.margins: 6; anchors.bottomMargin: -radius; radius: 28 }
 
         Row {
             id: thAttachChip

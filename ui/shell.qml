@@ -15,15 +15,6 @@ FloatingWindow {
     implicitWidth: 1180
     implicitHeight: 760
 
-    // Keycap chip + muted label — canonical QsLib family components,
-    // re-derived locally only to bake in the row anchoring.
-    component StatusCap: Lib.KeyCap {
-        anchors.verticalCenter: parent.verticalCenter
-    }
-    component CapLabel: Lib.CapLabel {
-        anchors.verticalCenter: parent.verticalCenter
-    }
-
     // Shared panel motion — one source of truth for every panel reveal/collapse
     // (sidebar, thread). Retune here and all of them change at once. Vaul drawer
     // curve: transform 0.2s cubic-bezier(0.165, 0.84, 0.44, 1) — a clean ease-out,
@@ -513,7 +504,7 @@ FloatingWindow {
             Row {
                 id: mainRow
                 anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-                anchors.bottom: statusbar.top
+                anchors.bottom: parent.bottom
 
                 RailBar {
                     id: rail
@@ -583,7 +574,7 @@ FloatingWindow {
                         anchors { top: header.bottom; left: parent.left; right: parent.right; bottom: parent.bottom
                                   topMargin: 6
                                   leftMargin: 4 + 8 * (1 - Math.min(1, sidebar.width / 264))
-                                  rightMargin: 12; bottomMargin: 12 }
+                                  rightMargin: 12; bottomMargin: -Theme.radiusCard }
                         // focused-panel accent: the mlqs inbox hairline
                         color: Ground.pane
                         border.width: 1
@@ -607,12 +598,14 @@ FloatingWindow {
                     Item {
                         id: footer
                         anchors.left: chatCard.left; anchors.right: chatCard.right
-                        anchors.bottom: chatCard.bottom
-                        height: composer.height + typingRow.height + 30
+                        anchors.bottom: chatCard.bottom; anchors.bottomMargin: Theme.radiusCard
+                        height: typingRow.height + 14 + composer.height + 6
 
+                        // Cockpit's chin: bleeds past the window bottom so only its top corners show.
                         Sheet {
-                            anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: composer.top
-                                      leftMargin: 6; rightMargin: 6; bottomMargin: 6; topMargin: -12 }
+                            anchors { left: parent.left; right: parent.right; top: typingRow.bottom; bottom: parent.bottom
+                                      leftMargin: 12; rightMargin: 12; bottomMargin: -radius }
+                            radius: 28
                         }
 
                         Item {
@@ -632,18 +625,30 @@ FloatingWindow {
 
                         Composer {
                             id: composer
-                            anchors.top: typingRow.bottom; anchors.topMargin: 12
+                            anchors.top: typingRow.bottom; anchors.topMargin: 14
                             anchors.left: parent.left; anchors.right: parent.right
-                            anchors.leftMargin: 18; anchors.rightMargin: 18
+                            anchors.leftMargin: 30; anchors.rightMargin: 30
                             onExitInsert: win.backToNormal()
                             onOpenPalette: palette.show()
                             onGifCommand: (q) => gifPicker.show(q)
                             onOpenSummarize: summarizePicker.start()
+                            onAttachRequested: win.openUpload()
                             onPageScroll: (d) => win.halfPage(d)
                             onPanelMove: (d) => win.focusPanel(d < 0 ? "sidebar" : "messages")
                             // Clicking into the composer makes the messages panel the
                             // focused one, so the state machine is in sync on Esc.
                             onInputHasFocusChanged: if (inputHasFocus) win.focusPanel("messages")
+                        }
+
+                        Text {
+                            anchors.right: composer.right; anchors.rightMargin: 10
+                            anchors.bottom: composer.bottom; anchors.bottomMargin: 5
+                            visible: text.length > 0
+                            text: [win.pendingCount > 0 ? String(win.pendingCount) : "",
+                                   Backend.updateAvailable ? "⟳ update " + Backend.updateCurrent + " → " + Backend.updateLatest + " · U to apply" : ""]
+                                  .filter(t => t.length).join("   ")
+                            color: Backend.updateAvailable ? Theme.orange : Theme.fg_muted
+                            font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 12
                         }
                     }
 
@@ -774,7 +779,7 @@ FloatingWindow {
                         id: thread
                         width: Math.min(560, parent.width * 0.58)
                         anchors.top: parent.top; anchors.bottom: parent.bottom
-                        anchors.topMargin: 8; anchors.bottomMargin: 12
+                        anchors.topMargin: 8; anchors.bottomMargin: -Theme.radiusCard
                         anchors.right: parent.right
                         // slide via a panel-width-relative right margin (not an x
                         // tied to parent.width) so toggling the sidebar — which
@@ -798,7 +803,7 @@ FloatingWindow {
                         id: profilePanel
                         width: Math.min(420, parent.width * 0.44)
                         anchors.top: parent.top; anchors.bottom: parent.bottom
-                        anchors.topMargin: 8; anchors.bottomMargin: 12
+                        anchors.topMargin: 8; anchors.bottomMargin: -Theme.radiusCard
                         anchors.right: parent.right
                         anchors.rightMargin: Backend.profileOpen ? 12 : -(width + 24)
                         Behavior on anchors.rightMargin { PanelMotion {} }
@@ -808,68 +813,14 @@ FloatingWindow {
                 }
             }
 
-            // Voice-call bar (dsqrd) — sits above the statusbar, self-hides when
+            // Voice-call bar (dsqrd) — sits at the window bottom, self-hides when
             // not in a call; the daemon hosts the call in a hidden Helium.
             VoiceBar {
                 anchors.left: parent.left; anchors.right: parent.right
-                anchors.bottom: statusbar.top
+                anchors.bottom: parent.bottom
                 z: 50
             }
 
-            // ── statusbar (picker-footer style) ────────────────────────────
-            Rectangle {
-                id: statusbar
-                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                height: 36; color: Ground.color
-                Row {
-                    id: leftStatus
-                    anchors.left: parent.left; anchors.leftMargin: 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 10
-                    Rectangle {
-                        width: modeLabel.implicitWidth + 16; height: 22; radius: 7
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: win.insertMode ? "#315C49" : Theme.green
-                        Text { 
-                            id: modeLabel; anchors.centerIn: parent
-                            text: win.insertMode ? "INSERT" : "NORMAL"
-                            // Contrast against the chip's own bg: dark text on a light
-                            // chip (dark-mode green / orange), light text on a dark chip
-                            // (light-mode green) — fixes dark-on-dark-green in light mode.
-                            color: (parent.color.r * 0.299 + parent.color.g * 0.587 + parent.color.b * 0.114) > 0.5 ? Theme.ink : Theme.brightWhite
-                            font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
-                            font.pixelSize: 11; font.weight: 500; font.letterSpacing: 0.5
-                        }
-                    }
-                    Text { 
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "panel: " + win.focusedPanel + "   #" + Backend.currentChannel
-                              + (win.pendingCount > 0 ? "      " + win.pendingCount : "")
-                        color: Theme.fg_muted; font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 12
-                    }
-                }
-                // Persistent help affordance — stays pinned in the corner even
-                // when the rest of the hints collapse on a narrow window.
-                Row {
-                    id: helpBadge
-                    visible: !Backend.updateAvailable
-                    anchors.right: parent.right; anchors.rightMargin: 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 6
-                    StatusCap { text: "?" }
-                    CapLabel { text: "cheatsheet" }
-                    HoverHandler { cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: help.show() }
-                }
-                Text {
-                    visible: Backend.updateAvailable
-                    anchors.right: parent.right; anchors.rightMargin: 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "⟳ update available · " + Backend.updateCurrent + " → " + Backend.updateLatest + " · U to apply"
-                    color: Theme.orange
-                    font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 12
-                }
-            }
 
             ChannelPalette {
                 id: palette
