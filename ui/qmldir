@@ -28,4 +28,3 @@ AuthPage AuthPage.qml
 Sheet Sheet.qml
 RoundAction RoundAction.qml
 singleton Ground Ground.qml
-DotGrid DotGrid.qml

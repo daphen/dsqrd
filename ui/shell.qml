@@ -509,7 +509,6 @@ FloatingWindow {
             visible: Backend.authState === "signedIn"
             // reference layout: flat canvas, panes float as cards on it
             color: Ground.color
-            DotGrid { anchors.fill: parent }
 
             Row {
                 id: mainRow
