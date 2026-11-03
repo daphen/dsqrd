@@ -12,16 +12,14 @@ Rectangle {
     // Grow with the text, capped at 180px; a single line's natural implicitHeight
     // is the minimum (no artificial floor). Matches the thread reply input.
     implicitHeight: Math.min(180, input.implicitHeight + 26 + (((attaching && !Backend.threadOpen) || replying) ? 26 : 0))
-    radius: Theme.radiusInner
+    radius: Math.min(height / 2, 24)
     readonly property bool focused: input.focus
     readonly property color inkFg: Theme.fg
     readonly property color inkMuted: Theme.fg_muted
-    readonly property color activeRing: Theme.mode === "light"
-        ? Theme.ink
-        : Qt.hsla(0.583, 0.29, 0.90, 1)
-    color: Theme.bg
-    border.color: focused ? activeRing : Theme.hairline
-    border.width: 2
+    readonly property color activeRing: Qt.alpha(Theme.mode === "light" ? "#242424" : "#FAFAFA", 0.6)
+    color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
+    border.color: focused ? activeRing : Qt.alpha(activeRing, 0)
+    border.width: 1.5
     Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
 
     signal exitInsert()
@@ -82,7 +80,7 @@ Rectangle {
     Row {
         id: replyChip
         visible: root.replying
-        anchors.left: parent.left; anchors.leftMargin: 14
+        anchors.left: parent.left; anchors.leftMargin: 18
         anchors.top: parent.top; anchors.topMargin: 8
         spacing: 6
         Text { anchors.verticalCenter: parent.verticalCenter
@@ -105,7 +103,7 @@ Rectangle {
         visible: root.attaching && !Backend.threadOpen
         // sit to the right of the reply chip when both are showing, else at the edge
         anchors.left: root.replying ? replyChip.right : parent.left
-        anchors.leftMargin: root.replying ? 16 : 14
+        anchors.leftMargin: root.replying ? 16 : 18
         anchors.top: parent.top; anchors.topMargin: 8
         spacing: 6
         Icon { name: "paperclip"; width: 13; height: 13; color: Theme.fg_secondary
@@ -126,7 +124,7 @@ Rectangle {
     Flickable {
         id: flick
         anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom
-                  leftMargin: 14; rightMargin: Backend.railHidden
+                  leftMargin: 18; rightMargin: Backend.railHidden
                       ? sendBtn.width + sumBtn.width + 20
                       : sendBtn.width + 14
                   topMargin: 12 + (((root.attaching && !Backend.threadOpen) || root.replying) ? 24 : 0); bottomMargin: 12 }
@@ -206,26 +204,24 @@ Rectangle {
     }
 
     // send button
-    PrimaryButton {
+    RoundAction {
         id: sendBtn
         anchors.right: parent.right; anchors.rightMargin: 6
         anchors.bottom: parent.bottom; anchors.bottomMargin: root.actionsFillIdle ? 6 : 8
-        width: root.actionSize; height: root.actionSize; radius: Theme.radiusSm
-        primary: true
+        width: root.actionSize; height: root.actionSize
         iconName: "paper-plane-2"
-        enabled: input.text.trim().length > 0
-        onClicked: root.send()
+        ready: input.text.trim().length > 0
+        onClicked: if (ready) root.send()
     }
 
     // summarize-while-away button, left of send — Discord only (the daemon verb
     // exists only in dsqrd). Opens the scope picker; its pinecone animates while summarizing.
-    PrimaryButton {
+    RoundAction {
         id: sumBtn
         visible: Backend.railHidden
         anchors.right: sendBtn.left; anchors.rightMargin: 6
         anchors.bottom: parent.bottom; anchors.bottomMargin: root.actionsFillIdle ? 6 : 8
-        width: root.actionSize; height: root.actionSize; radius: Theme.radiusSm
-        primary: false
+        width: root.actionSize; height: root.actionSize
         onClicked: if (!Backend.summaryLoading) root.openSummarize()
         PineconeIcon {
             width: 21; height: 21; anchors.centerIn: parent

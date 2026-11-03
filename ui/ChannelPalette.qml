@@ -91,7 +91,7 @@ Item {
         anchors.fill: parent
         onClicked: palette.hide()
     }
-    Rectangle { anchors.fill: parent; color: Theme.ink; opacity: 0.45 }
+    Rectangle { anchors.fill: parent; color: Qt.alpha(Ground.color, 0.72) }
 
     // Plain Rectangle, NOT ClippingRectangle: the latter renders children into
     // an offscreen texture at 1x DPR, which blurs text on a fractional-scale
@@ -104,8 +104,8 @@ Item {
         x: Math.round((parent.width - width) / 2)
         y: Math.round(parent.height * 0.16)
         radius: 24
-        color: Theme.bg
-        border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, Theme.mode === "light" ? 0.15 : 0.10); border.width: 1
+        color: "transparent"
+        Sheet { anchors.fill: parent; radius: 24; z: -1 }
 
         MouseArea { anchors.fill: parent }   // swallow clicks (don't close)
 
@@ -121,15 +121,13 @@ Item {
                     anchors.fill: parent
                     anchors.leftMargin: 14; anchors.rightMargin: 14
                     anchors.topMargin: 14; anchors.bottomMargin: 6
-                    radius: 15
-                    color: Theme.surface1
-                    border.width: 1
-                    border.color: Theme.hairline
+                    radius: height / 2
+                    color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
                 }
                 Row {
                     anchors.fill: searchField; anchors.leftMargin: 14; anchors.rightMargin: 14; spacing: 10
-                    Text { anchors.verticalCenter: parent.verticalCenter; text: "⌕"
-                           color: Theme.fg_muted; font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 19 }
+                    Icon { anchors.verticalCenter: parent.verticalCenter; name: "magnifier"
+                           width: 16; height: 16; color: Theme.fg_muted }
                     TextInput { 
                         id: search
                         anchors.verticalCenter: parent.verticalCenter

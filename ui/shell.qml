@@ -508,7 +508,7 @@ FloatingWindow {
             anchors.fill: parent
             visible: Backend.authState === "signedIn"
             // reference layout: flat canvas, panes float as cards on it
-            color: Theme.bgDim
+            color: Ground.color
 
             Row {
                 id: mainRow
@@ -585,10 +585,11 @@ FloatingWindow {
                                   leftMargin: 4 + 8 * (1 - Math.min(1, sidebar.width / 264))
                                   rightMargin: 12; bottomMargin: 12 }
                         // focused-panel accent: the mlqs inbox hairline
-                        color: Theme.bg
+                        color: Ground.color
                         border.width: 1
                         border.color: (win.focusedPanel === "messages" && !Backend.threadOpen)
                                     ? Theme.hairlineSoft : "transparent"
+                        DotGrid { anchors.fill: parent; anchors.margins: 1 }
                     }
 
                     MessageList {
@@ -608,7 +609,12 @@ FloatingWindow {
                         id: footer
                         anchors.left: chatCard.left; anchors.right: chatCard.right
                         anchors.bottom: chatCard.bottom
-                        height: composer.height + typingRow.height + 16
+                        height: composer.height + typingRow.height + 30
+
+                        Sheet {
+                            anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: composer.top
+                                      leftMargin: 6; rightMargin: 6; bottomMargin: 6; topMargin: -12 }
+                        }
 
                         Item {
                             id: typingRow
@@ -627,9 +633,9 @@ FloatingWindow {
 
                         Composer {
                             id: composer
-                            anchors.top: typingRow.bottom; anchors.topMargin: 2
+                            anchors.top: typingRow.bottom; anchors.topMargin: 12
                             anchors.left: parent.left; anchors.right: parent.right
-                            anchors.leftMargin: Theme.insetCard; anchors.rightMargin: Theme.insetCard
+                            anchors.leftMargin: 18; anchors.rightMargin: 18
                             onExitInsert: win.backToNormal()
                             onOpenPalette: palette.show()
                             onGifCommand: (q) => gifPicker.show(q)
@@ -658,14 +664,13 @@ FloatingWindow {
                         Behavior on opacity { NumberAnimation { duration: 140 } }
                         Row {
                             id: mlRow; anchors.centerIn: parent; spacing: 8
-                            Rectangle {
-                                width: 8; height: 8; radius: 4; color: Theme.cursor
+                            ThinkingOrb {
+                                width: 18; height: 18
                                 anchors.verticalCenter: parent.verticalCenter
-                                SequentialAnimation on opacity {
-                                    running: Backend.mediaLoading; loops: Animation.Infinite
-                                    NumberAnimation { from: 1; to: 0.25; duration: 550 }
-                                    NumberAnimation { from: 0.25; to: 1; duration: 550 }
-                                }
+                                running: Backend.mediaLoading
+                                glow: Theme.cursor
+                                activityColors: [Theme.cursor]
+                                invertRing: true
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -696,14 +701,13 @@ FloatingWindow {
                         }
                         Row {
                             id: vbRow; anchors.centerIn: parent; spacing: 8
-                            Rectangle {
-                                width: 8; height: 8; radius: 4; color: Theme.red
+                            ThinkingOrb {
+                                width: 18; height: 18
                                 anchors.verticalCenter: parent.verticalCenter
-                                SequentialAnimation on opacity {
-                                    running: Backend.voiceState === "recording"; loops: Animation.Infinite
-                                    NumberAnimation { from: 1; to: 0.25; duration: 550 }
-                                    NumberAnimation { from: 0.25; to: 1; duration: 550 }
-                                }
+                                running: Backend.voiceState !== "idle"
+                                glow: Theme.red
+                                activityColors: [Theme.red]
+                                invertRing: true
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -730,14 +734,13 @@ FloatingWindow {
                         Behavior on opacity { NumberAnimation { duration: 140 } }
                         Row {
                             id: sbRow; anchors.centerIn: parent; spacing: 8
-                            Rectangle {
-                                width: 8; height: 8; radius: 4; color: Theme.orange
+                            ThinkingOrb {
+                                width: 18; height: 18
                                 anchors.verticalCenter: parent.verticalCenter
-                                SequentialAnimation on opacity {
-                                    running: Backend.summaryLoading; loops: Animation.Infinite
-                                    NumberAnimation { from: 1; to: 0.25; duration: 550 }
-                                    NumberAnimation { from: 0.25; to: 1; duration: 550 }
-                                }
+                                running: Backend.summaryLoading
+                                glow: Theme.orange
+                                activityColors: [Theme.orange]
+                                invertRing: true
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -818,8 +821,7 @@ FloatingWindow {
             Rectangle {
                 id: statusbar
                 anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                height: 36; color: Theme.surface0
-                Rectangle { anchors.top: parent.top; width: parent.width; height: 1; color: Theme.hairline }
+                height: 36; color: Ground.color
                 Row {
                     id: leftStatus
                     anchors.left: parent.left; anchors.leftMargin: 14

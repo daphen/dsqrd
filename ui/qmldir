@@ -25,3 +25,7 @@ SummarizePicker SummarizePicker.qml
 SummaryModal SummaryModal.qml
 SummarizeSetup SummarizeSetup.qml
 AuthPage AuthPage.qml
+Sheet Sheet.qml
+RoundAction RoundAction.qml
+singleton Ground Ground.qml
+DotGrid DotGrid.qml

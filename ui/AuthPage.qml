@@ -7,7 +7,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: Theme.bgDim
+        color: Ground.color
     }
 
     ColumnLayout {

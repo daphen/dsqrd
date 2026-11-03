@@ -7,8 +7,9 @@ import QsLib
 // Opened by Enter on a message; closed with q (handled in shell's key router).
 Rectangle {
     id: panel
-    color: Theme.bg
+    color: Ground.color
     radius: Theme.radiusCard   // floats as a card like the chat pane
+    DotGrid { anchors.fill: parent; anchors.margins: 1 }
 
     // Hairpin outline drawn ABOVE the content — rows and the reply footer
     // fill flush to the edge and would paint over a root border.
@@ -158,13 +159,15 @@ Rectangle {
         // Reserve a row for the staged-attachment chip so an upload in a thread
         // shows HERE (where it sends), not over the channel composer.
         readonly property real attachH: Backend.attachState !== "none" ? 22 : 0
-        height: bcastH + attachH + Math.min(180, replyInput.implicitHeight + 36)
+        height: bcastH + attachH + Math.min(180, replyInput.implicitHeight + 36) + 12
+
+        Sheet { anchors.fill: parent; anchors.margins: 6 }
 
         Row {
             id: thAttachChip
             visible: Backend.attachState !== "none"
             anchors.top: parent.top; anchors.left: parent.left
-            anchors.leftMargin: 14; anchors.topMargin: 8 + thFooter.bcastH
+            anchors.leftMargin: 22; anchors.topMargin: 14 + thFooter.bcastH
             spacing: 6
             Text { text: "📎"; anchors.verticalCenter: parent.verticalCenter
                    font.family: Theme.fontFamily; font.pixelSize: 13 }
@@ -185,7 +188,7 @@ Rectangle {
         Row {
             id: bcastRow
             anchors.top: parent.top; anchors.left: parent.left
-            anchors.leftMargin: 14; anchors.topMargin: 8
+            anchors.leftMargin: 22; anchors.topMargin: 14
             spacing: 6; visible: thFooter.bcastH > 0
             Rectangle {
                 width: 14; height: 14; radius: 3; anchors.verticalCenter: parent.verticalCenter
@@ -201,14 +204,14 @@ Rectangle {
         }
         Rectangle {
             id: replyBox
-            anchors.fill: parent; anchors.margins: 10; anchors.topMargin: 10 + thFooter.bcastH + thFooter.attachH; radius: Theme.radius
-            // insert mode = ink-tint fill + strong ring, same as the channel composer
+            anchors.fill: parent; anchors.margins: 16; anchors.topMargin: 16 + thFooter.bcastH + thFooter.attachH; radius: Math.min(height / 2, 24)
             readonly property bool focused: replyInput.focus
             readonly property color inkFg: Theme.fg
             readonly property color inkMuted: Theme.fg_muted
-            color: focused ? Theme.tintFill : Theme.surface
-            border.width: focused ? 1.5 : 1
-            border.color: focused ? (Theme.mode === "light" ? Theme.fg : "#FFFFFF") : Theme.hairline
+            readonly property color activeRing: Qt.alpha(Theme.mode === "light" ? "#242424" : "#FAFAFA", 0.6)
+            color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
+            border.width: 1.5
+            border.color: focused ? activeRing : Qt.alpha(activeRing, 0)
             Behavior on color { ColorAnimation { duration: 120 } }
             Behavior on border.color { ColorAnimation { duration: 120 } }
             // same `:` emoji + `@` mention autocomplete as the channel composer
@@ -223,7 +226,7 @@ Rectangle {
             Flickable {
                 id: replyFlick
                 anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom
-                          leftMargin: 12; rightMargin: 12; topMargin: 8; bottomMargin: 8 }
+                          leftMargin: 16; rightMargin: 16; topMargin: 8; bottomMargin: 8 }
                 contentHeight: replyInput.implicitHeight; clip: true
                 function ensureVisible(r) {
                     if (contentY >= r.y) contentY = r.y

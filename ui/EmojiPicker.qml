@@ -56,7 +56,7 @@ Item {
     function accept() { const r = rows[sel]; if (r) { hide(); Backend.recordEmojiUse(r.name); picker.picked(r.name) } }
 
     MouseArea { anchors.fill: parent; onClicked: picker.hide() }
-    Rectangle { anchors.fill: parent; color: Theme.ink; opacity: 0.45 }
+    Rectangle { anchors.fill: parent; color: Qt.alpha(Ground.color, 0.72) }
 
     Rectangle {
         width: Math.round(Math.min(420, parent.width - 80))
@@ -64,8 +64,8 @@ Item {
         x: Math.round((parent.width - width) / 2)
         y: Math.round(parent.height * 0.2)
         radius: 24
-        color: Theme.bg
-        border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, Theme.mode === "light" ? 0.15 : 0.10); border.width: 1
+        color: "transparent"
+        Sheet { anchors.fill: parent; radius: 24; z: -1 }
         MouseArea { anchors.fill: parent }
 
         Column {
@@ -78,8 +78,8 @@ Item {
                     anchors.fill: parent
                     anchors.leftMargin: 14; anchors.rightMargin: 14
                     anchors.topMargin: 14; anchors.bottomMargin: 6
-                    radius: 15
-                    color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.07)
+                    radius: height / 2
+                    color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
                 }
                 Row {
                     anchors.fill: searchField; anchors.leftMargin: 14; anchors.rightMargin: 14; spacing: 10
