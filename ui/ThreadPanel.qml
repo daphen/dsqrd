@@ -7,9 +7,8 @@ import QsLib
 // Opened by Enter on a message; closed with q (handled in shell's key router).
 Rectangle {
     id: panel
-    color: Ground.color
+    color: Ground.pane
     radius: Theme.radiusCard   // floats as a card like the chat pane
-    DotGrid { anchors.fill: parent; anchors.margins: 1 }
 
     // Hairpin outline drawn ABOVE the content — rows and the reply footer
     // fill flush to the edge and would paint over a root border.

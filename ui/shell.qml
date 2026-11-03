@@ -509,6 +509,7 @@ FloatingWindow {
             visible: Backend.authState === "signedIn"
             // reference layout: flat canvas, panes float as cards on it
             color: Ground.color
+            DotGrid { anchors.fill: parent }
 
             Row {
                 id: mainRow
@@ -585,11 +586,10 @@ FloatingWindow {
                                   leftMargin: 4 + 8 * (1 - Math.min(1, sidebar.width / 264))
                                   rightMargin: 12; bottomMargin: 12 }
                         // focused-panel accent: the mlqs inbox hairline
-                        color: Ground.color
+                        color: Ground.pane
                         border.width: 1
                         border.color: (win.focusedPanel === "messages" && !Backend.threadOpen)
                                     ? Theme.hairlineSoft : "transparent"
-                        DotGrid { anchors.fill: parent; anchors.margins: 1 }
                     }
 
                     MessageList {

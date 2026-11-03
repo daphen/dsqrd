@@ -8,9 +8,8 @@ import QsLib
 // them. Same slide-in card grammar as ThreadPanel.
 Rectangle {
     id: panel
-    color: Ground.color
+    color: Ground.pane
     radius: Theme.radiusCard
-    DotGrid { anchors.fill: parent; anchors.margins: 1 }
 
     readonly property var p: Backend.profileData
     readonly property string uid: Backend.profileUser

@@ -7,7 +7,7 @@ import QsLib
 Rectangle {
     id: sidebar
     // sits directly on the window canvas — no own surface, no divider
-    color: Ground.color
+    color: "transparent"
     property bool active: true   // is this the focused panel?
     // freeze channel-list reordering while the user navigates here
     onActiveChanged: Backend.sidebarNavigating = active
