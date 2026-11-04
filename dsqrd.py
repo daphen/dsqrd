@@ -14,6 +14,7 @@ import array
 import atexit
 import base64
 import faulthandler
+import fcntl
 import hashlib
 import html as _html
 import json
@@ -2591,10 +2592,13 @@ class DQS:
             # Avatar download can block, so resolve it off the gateway thread;
             # clickable → opens the channel.
             uid, ah = m.get("user_id"), m.get("avatar")
-            threading.Thread(
-                target=lambda: self.notifier.notify(
-                    title, body, (ws, cid), image=cached_avatar(uid, ah)),
-                daemon=True).start()
+            def deliver():
+                image = cached_avatar(uid, ah)
+                if self.app_active and cid == self.active_ch:
+                    return
+                self.notifier.notify(title, body, (ws, cid), image=image)
+
+            threading.Thread(target=deliver, daemon=True).start()
         else:
             try:
                 subprocess.Popen(["notify-send", "--app-name", "Discord", title, body],
@@ -2993,4 +2997,10 @@ class DQS:
 
 
 if __name__ == "__main__":
-    DQS().run()
+    with open(SOCK + ".lock", "a") as lease:
+        try:
+            fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("dsqrd: daemon already running", flush=True)
+            sys.exit(0)
+        DQS().run()
