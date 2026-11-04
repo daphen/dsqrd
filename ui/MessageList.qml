@@ -80,11 +80,8 @@ ListView {
     // Reach the TRUE bottom: realize the last item, then clamp contentY to the
     // exact end (section-safe + includes bottomMargin). Used for auto-pin and the
     // typing-row shrink — not by ctrl+d/u (those only fire goBottomNow via stick).
-    // The true max scroll: Flickable adds bottomMargin BEYOND contentHeight, so
-    // the real bottom is contentHeight - height + bottomMargin. Using
-    // contentHeight - height alone stops bottomMargin short (the wheel, via
-    // returnToBounds, reaches further — keyboard nav must match it).
-    function bottomY() { return Math.max(0, contentHeight - height + bottomMargin) }
+    // Content coordinates start at originY, which shifts when history is prepended.
+    function bottomY() { return originY + Math.max(0, contentHeight - height + bottomMargin) }
     // Rest the view at the very bottom. Normally contentY = bottomY() matches the
     // wheel exactly (includes the flick bottomMargin). But contentHeight can get
     // stuck too short when a delegate grows late (a reply-count footer appearing,
@@ -95,7 +92,7 @@ ListView {
     function snapToBottom() {
         if (count <= 0) return
         const li = itemAtIndex(count - 1)
-        if (li && li.y + li.height > contentHeight + 0.5) {
+        if (li && li.y + li.height > originY + contentHeight + 0.5) {
             positionViewAtIndex(count - 1, ListView.Beginning)
             positionViewAtEnd()
         } else {
@@ -207,7 +204,7 @@ ListView {
     property real _anchorOff: 0     // its sub-pixel offset above the viewport top
     function maybeLoadOlder() {
         if (count <= 0 || Backend.loadingOlder) return
-        if (currentIndex <= 6 || contentY < 400) Backend.requestOlder()
+        if (currentIndex <= 6 || contentY - originY < 400) Backend.requestOlder()
     }
 
     // vim nav (j/k/g/G/ctrl-d/u) — drives a message cursor, but first scrolls
@@ -250,7 +247,7 @@ ListView {
     // ctrl+e / ctrl+y: nudge the view by ~3 lines WITHOUT moving the cursor.
     function scroll(d) {
         const maxY = bottomY()
-        contentY = Math.max(0, Math.min(maxY, contentY + d * 48))
+        contentY = Math.max(originY, Math.min(maxY, contentY + d * 48))
         stick = atYEnd
         if (d < 0) maybeLoadOlder()
     }
