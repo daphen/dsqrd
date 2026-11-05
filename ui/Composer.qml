@@ -24,7 +24,11 @@ Item {
         anchors { left: parent.left; right: parent.right }
         y: 4; height: root.chipHeight + root.textHeight + 30
         radius: Math.min(height / 2, 24)
-        base: Theme.mode === "light" ? "#F7F9FA" : "#141414"
+        base: Theme.mode === "light" ? "#F7F9FA" : "#282828"
+        // Light keeps the picker's two-edge recipe, tightened; in dark a bottom shadow reads as a glossy tube.
+        topShade: Theme.mode === "light" ? 0.035 : 0.20
+        bottomShade: Theme.mode === "light" ? 0.03 : 0
+        depth: Theme.mode === "light" ? 8 : 4
         field: true; emphasis: input.activeFocus ? 1.25 : 1
     }
 
