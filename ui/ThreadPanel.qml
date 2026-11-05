@@ -201,18 +201,14 @@ Rectangle {
                    font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting; font.pixelSize: 12 }
             TapHandler { onTapped: panel.alsoToChannel = !panel.alsoToChannel }
         }
-        Rectangle {
+        WellSurface {
             id: replyBox
             anchors.fill: parent; anchors.margins: 16; anchors.topMargin: 16 + thFooter.bcastH + thFooter.attachH; radius: Math.min(height / 2, 24)
             readonly property bool focused: replyInput.focus
             readonly property color inkFg: Theme.fg
             readonly property color inkMuted: Theme.fg_muted
-            readonly property color activeRing: Qt.alpha(Theme.mode === "light" ? "#242424" : "#FAFAFA", 0.6)
-            color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
-            border.width: 1.5
-            border.color: focused ? activeRing : Qt.alpha(activeRing, 0)
-            Behavior on color { ColorAnimation { duration: 120 } }
-            Behavior on border.color { ColorAnimation { duration: 120 } }
+            base: Ground.pane
+            field: true; emphasis: replyInput.activeFocus ? 1.25 : 1
             // same `:` emoji + `@` mention autocomplete as the channel composer
             Autocomplete { id: replyAc; anchors.fill: parent; input: replyInput }
             Connections {

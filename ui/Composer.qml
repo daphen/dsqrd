@@ -17,18 +17,15 @@ Item {
     readonly property bool focused: input.focus
     readonly property color inkFg: Theme.fg
     readonly property color inkMuted: Theme.fg_muted
-    readonly property color activeRing: Qt.alpha(Theme.mode === "light" ? "#242424" : "#FAFAFA", 0.6)
     signal attachRequested()
 
-    Rectangle {
+    WellSurface {
         id: inputFill
         anchors { left: parent.left; right: parent.right }
         y: 4; height: root.chipHeight + root.textHeight + 30
         radius: Math.min(height / 2, 24)
-        color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
-        border.color: root.focused ? root.activeRing : Qt.alpha(root.activeRing, 0)
-        border.width: 1.5
-        Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
+        base: Ground.pane
+        field: true; emphasis: input.activeFocus ? 1.25 : 1
     }
 
     signal exitInsert()
