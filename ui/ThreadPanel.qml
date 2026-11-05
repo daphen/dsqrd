@@ -207,7 +207,7 @@ Rectangle {
             readonly property bool focused: replyInput.focus
             readonly property color inkFg: Theme.fg
             readonly property color inkMuted: Theme.fg_muted
-            base: Ground.pane
+            base: Theme.mode === "light" ? "#F7F9FA" : "#141414"
             field: true; emphasis: replyInput.activeFocus ? 1.25 : 1
             // same `:` emoji + `@` mention autocomplete as the channel composer
             Autocomplete { id: replyAc; anchors.fill: parent; input: replyInput }

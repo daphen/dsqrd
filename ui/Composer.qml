@@ -24,7 +24,7 @@ Item {
         anchors { left: parent.left; right: parent.right }
         y: 4; height: root.chipHeight + root.textHeight + 30
         radius: Math.min(height / 2, 24)
-        base: Ground.pane
+        base: Theme.mode === "light" ? "#F7F9FA" : "#141414"
         field: true; emphasis: input.activeFocus ? 1.25 : 1
     }
 
