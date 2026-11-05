@@ -209,8 +209,8 @@ Rectangle {
             readonly property color inkMuted: Theme.fg_muted
             base: Theme.mode === "light" ? "#F7F9FA" : "#282828"
             // Light keeps the picker's two-edge recipe, tightened; in dark a bottom shadow reads as a glossy tube.
-            topShade: Theme.mode === "light" ? 0.035 : 0.20
-            bottomShade: Theme.mode === "light" ? 0.03 : 0
+            topShade: Theme.mode === "light" ? 0.022 : 0.11
+            bottomShade: Theme.mode === "light" ? 0.018 : 0
             depth: Theme.mode === "light" ? 8 : 4
             field: true; emphasis: replyInput.activeFocus ? 1.25 : 1
             // same `:` emoji + `@` mention autocomplete as the channel composer
