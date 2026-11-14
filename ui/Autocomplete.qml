@@ -96,6 +96,7 @@ Item {
         border.color: Theme.hairline; border.width: 1
         ListView {
             id: acList
+            ScrollFeel { flick: acList }
             anchors.fill: parent; anchors.margins: 4; clip: true
             model: ac.rows; currentIndex: ac.sel
             highlightFollowsCurrentItem: false

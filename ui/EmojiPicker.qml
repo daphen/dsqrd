@@ -110,6 +110,7 @@ Item {
 
             ListView {
                 id: list
+                ScrollFeel { flick: list }
                 width: parent.width
                 height: Math.round(Math.min(360, contentHeight + 18))
                 topMargin: 8

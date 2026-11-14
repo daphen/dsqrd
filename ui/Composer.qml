@@ -133,6 +133,7 @@ Item {
 
     Flickable {
         id: flick
+        ScrollFeel { flick: flick }
         anchors { left: parent.left; right: parent.right; leftMargin: 18; rightMargin: sendBtn.width + 14 }
         y: inputFill.y + 15 + root.chipHeight; height: root.textHeight
         contentHeight: input.implicitHeight; clip: true

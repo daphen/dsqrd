@@ -224,6 +224,7 @@ Rectangle {
             // of pinned to the top of a fixed-height field.
             Flickable {
                 id: replyFlick
+                ScrollFeel { flick: replyFlick }
                 anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom
                           leftMargin: 16; rightMargin: 16; topMargin: 8; bottomMargin: 8 }
                 contentHeight: replyInput.implicitHeight; clip: true
