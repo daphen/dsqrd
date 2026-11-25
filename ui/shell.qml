@@ -15,6 +15,15 @@ FloatingWindow {
     implicitWidth: 1180
     implicitHeight: 760
 
+    IpcHandler {
+        target: "window"
+        function openWindow(): bool {
+            win.visible = false
+            win.visible = true
+            return true
+        }
+    }
+
     // Keycap chip + muted label — canonical QsLib family components,
     // re-derived locally only to bake in the row anchoring.
     component StatusCap: Lib.KeyCap {
