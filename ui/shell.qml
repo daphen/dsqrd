@@ -15,6 +15,15 @@ FloatingWindow {
     implicitWidth: 1180
     implicitHeight: 760
 
+    IpcHandler {
+        target: "window"
+        function openWindow(): bool {
+            win.visible = false
+            win.visible = true
+            return true
+        }
+    }
+
     // Shared panel motion — one source of truth for every panel reveal/collapse
     // (sidebar, thread). Retune here and all of them change at once. Vaul drawer
     // curve: transform 0.2s cubic-bezier(0.165, 0.84, 0.44, 1) — a clean ease-out,

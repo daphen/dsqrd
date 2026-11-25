@@ -74,8 +74,9 @@
           fi
           for _ in $(seq 1 300); do [ -S "$sock" ] && break; sleep 0.1; done
 
-          # Let Quickshell key single-instance detection to this exact config;
-          # a windowless process from an older Nix store path must not block it.
+          if [ "$(qs ipc -p "${daemon}/share/dsqrd/ui" call -- window openWindow 2>/dev/null)" = true ]; then
+            exit 0
+          fi
           exec qs --no-duplicate -p "${daemon}/share/dsqrd/ui" 9>&-
         '';
       };
