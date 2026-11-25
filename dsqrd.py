@@ -1321,13 +1321,24 @@ class DQS:
         ws = self.chan_guild.get(channel_id)
         return None if (ws is None or ws == DM_WS) else ws
 
+    def _fetch_messages(self, conn, channel_id, before=None):
+        msgs = self.discord.get_messages(channel_id, num=50, before=before)
+        if msgs is None:
+            time.sleep(0.5)
+            msgs = self.discord.get_messages(channel_id, num=50, before=before)
+        if msgs is None:
+            self.write(conn, {"type": "toast", "text": "Could not load messages. Please try again."})
+        return msgs
+
     def send_recent(self, conn, channel_id):
         # Tell the gateway this is the active channel so it surfaces live events for it.
         try:
             self.gateway.subscribe(channel_id, self.guild_for(channel_id))
         except Exception:
             pass
-        msgs = self.discord.get_messages(channel_id, num=50) or []
+        msgs = self._fetch_messages(conn, channel_id)
+        if msgs is None:
+            return
         self._seed_participation_cutoff(channel_id, msgs)
         for m in msgs:
             self._note_latest(channel_id, m)
@@ -1351,7 +1362,9 @@ class DQS:
         self.write(conn, {"type": "users", "users": self.users_payload(channel_id)})
 
     def send_history(self, conn, channel_id, before):
-        msgs = self.discord.get_messages(channel_id, num=50, before=before) or []
+        msgs = self._fetch_messages(conn, channel_id, before)
+        if msgs is None:
+            return
         out = [map_msg(m) for m in msgs]
         for mm in out:
             self.queue_gifv(channel_id, mm)
